@@ -50,6 +50,9 @@ comment you judge aligned (consistent with the signal) or countervailing
 cannot find any comment that can reasonably be linked to a signal, call
 note_no_evidence with a brief reason instead of forcing a link.
 
+The theme for every record_link call must be exactly one of this fixed
+list (do not invent new theme labels): {themes}.
+
 Feedback is reported learner experience. It may help stakeholders interpret
 a signal, but it never establishes cause — do not write or imply that any
 comment or pattern "caused", "explains", "is due to", or "is because of" a
@@ -74,7 +77,9 @@ rationale text the same way, so it can be reused safely.
 
 Call finish_investigation once you have addressed every signal from
 list_signals (a recorded link or note_no_evidence for each). If you are
-genuinely uncertain how to proceed on a signal, call ask_analyst."""
+genuinely uncertain how to proceed on a signal, call ask_analyst.""".format(
+    themes="; ".join(config.THEMES)
+)
 
 
 TOOL_SPECS = [
@@ -118,7 +123,7 @@ TOOL_SPECS = [
                     "signal_id": {"type": "string"},
                     "comment_id": {"type": "string"},
                     "relation": {"type": "string", "enum": ["aligned", "countervailing"]},
-                    "theme": {"type": "string"},
+                    "theme": {"type": "string", "enum": config.THEMES},
                     "rationale": {"type": "string", "description": "One line, no names, no causal claims."},
                 },
                 "required": ["signal_id", "comment_id", "relation", "theme", "rationale"],
@@ -232,8 +237,8 @@ class InvestigationTools:
             raise ToolError(f"Unknown or quarantined comment_id: {comment_id!r}")
         if relation not in ("aligned", "countervailing"):
             raise ToolError(f"relation must be 'aligned' or 'countervailing', got {relation!r}")
-        if not theme or not str(theme).strip():
-            raise ToolError("theme is required")
+        if theme not in config.THEMES:
+            raise ToolError(f"theme must be one of {config.THEMES}, got {theme!r}")
         if not rationale or not str(rationale).strip():
             raise ToolError("rationale is required")
         link = Link(comment_id=comment_id, theme=theme, rationale=rationale)
@@ -324,6 +329,20 @@ def _get_model() -> str:
     return model
 
 
+def _create_completion(client, model: str, messages: list[dict]):
+    """Calls chat.completions.create, retrying once with
+    reasoning_effort='none' if the model rejects function tools on a
+    reasoning-model default (some newer OpenAI models require this, or the
+    /v1/responses endpoint, to use tools via chat.completions)."""
+    kwargs = {"model": model, "messages": messages, "tools": TOOL_SPECS, "tool_choice": "auto"}
+    try:
+        return client.chat.completions.create(**kwargs)
+    except Exception as exc:
+        if "reasoning_effort" in str(exc) and "not supported" in str(exc):
+            return client.chat.completions.create(**kwargs, reasoning_effort="none")
+        raise
+
+
 def run_investigation(
     signals: list[Signal],
     eligible_comments: list[EligibleComment],
@@ -360,12 +379,7 @@ def run_investigation(
 
     call_count = 0
     while True:
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=TOOL_SPECS,
-            tool_choice="auto",
-        )
+        response = _create_completion(client, model, messages)
         choice = response.choices[0]
         message = choice.message
         messages.append(_message_to_dict(message))

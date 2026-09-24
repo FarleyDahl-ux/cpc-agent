@@ -144,3 +144,42 @@ chosen and recorded here.
   dataset only one segment ever pauses, so "exclude the Region C segment"
   and "exclude whatever blank value comes up" are equivalent, and the
   generic form is easier to keep correct if the sample data changes.
+
+## Phase 6 — End-to-end run and scoring
+
+- **`pytest`'s default run excludes `@pytest.mark.integration` tests** via
+  `addopts = "-m 'not integration'"` in `pyproject.toml`, rather than
+  relying on contributors to remember `-m "not integration"` by hand. Run
+  them explicitly with `pytest -m integration`.
+- **`_create_completion` retries once with `reasoning_effort="none"`** if
+  the API rejects the first call with a "reasoning_effort ... not
+  supported" error. Discovered running the real end-to-end test against
+  the configured model (`gpt-6-sol`): OpenAI's chat.completions endpoint
+  refuses function tools with its default reasoning-effort setting for
+  that model and asks for either the `/v1/responses` endpoint or
+  `reasoning_effort='none'`. Kept the simpler fix (stay on
+  chat.completions, matching CLAUDE.md's "plain agent loop" function
+  calling) rather than switching endpoints, since it is model-specific and
+  harmless for models that don't need it (the retry only triggers on that
+  exact error message).
+- **`record_link`'s `theme` argument is now constrained to
+  `config.THEMES`**, via the tool's JSON-schema `enum` and a matching
+  check in `InvestigationTools.record_link`. The first real end-to-end run
+  showed the live model inventing free-text theme labels (e.g. "Access to
+  live help") in the absence of any constraint — the system prompt only
+  said "a theme", and `data_dictionary.txt`'s fixed theme list was never
+  actually enforced anywhere. Documented in `docs/test_results.md` as the
+  one correctness gap the live run surfaced that the mocked test suite,
+  built around already-canonical theme strings, could not have caught.
+- **A real live run's evidence-status output can differ from
+  `tests/fixtures/expected_results.json`/`answer_key.md`** even though the
+  deterministic evidence-status *code* matches them exactly given the
+  answer key's own aligned/countervailing IDs (proven in
+  `tests/test_evidence.py`). In one real run the model linked FB022 as
+  countervailing for S4, which the answer key doesn't include, changing
+  S4's status from Limited to Mixed via the same (correct) precedence
+  rule. This is expected LLM judgement variance in the investigation
+  stage, not a defect — recorded transparently in
+  `docs/test_results.md` rather than treated as a test failure, since
+  CLAUDE.md's architecture deliberately keeps calculation/flagging/status
+  deterministic while leaving comment interpretation to the model.
