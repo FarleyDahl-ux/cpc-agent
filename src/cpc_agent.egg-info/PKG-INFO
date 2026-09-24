@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: cpc-agent
+Version: 0.1.0
+Summary: CPC Preparation Agent (prototype) — local, human-gated draft workshop brief builder.
+Requires-Python: >=3.11
