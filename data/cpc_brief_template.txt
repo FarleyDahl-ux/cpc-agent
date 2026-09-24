@@ -1,0 +1,24 @@
+# DRAFT — Course Performance Workshop Brief (not approved)
+Course: [code and title] | Period: [ ] | Data snapshot: [ ] | Prepared by: CPC Preparation Agent | Status: Pending final approval / Approved / Returned
+Run ID: [ ] | Input data version: [ ] | Instruction version: [ ] | Generated: [date]
+
+## 1. Scope and sources
+[Files used, periods, any sources unavailable]
+
+## 2. Signal summary
+[Only findings the analyst has approved. Detailed evidence records are kept separately.]
+| ID | Signal (performance measure) | Value | Comparison / rule | Source, period, n | Evidence status |
+|---|---|---|---|---|---|
+
+## 3. Learner feedback linked to each signal
+For each signal: relevant comments (IDs), countervailing comments (IDs), theme, limitations.
+Feedback is reported experience and may help interpret a signal. It does not establish cause.
+
+## 4. Exceptions and evidence gaps
+[Missing data, quarantined comments, low samples, unresolved issues]
+
+## 5. Questions for the workshop
+[Neutral questions linked to signal IDs. No recommendations.]
+
+## 6. Approval
+Analyst: [ ] | Decision: pending / approved / returned

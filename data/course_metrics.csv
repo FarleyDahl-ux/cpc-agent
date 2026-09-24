@@ -1,0 +1,9 @@
+reporting_period,snapshot_date,delivery_region,delivery_mode,enrolments,commencements,completions,in_progress,withdrawals
+2024,2024-12-31,Region A,Face to face,420,300,150,170,100
+2024,2024-12-31,Region B,Face to face,360,260,120,150,90
+2024,2024-12-31,Region C,Blended,300,210,100,125,75
+2024,2024-12-31,Online,Online,1500,1100,380,655,465
+2025,2025-12-31,Region A,Face to face,430,310,160,170,100
+2025,2025-12-31,Region B,Face to face,350,250,118,147,85
+2025,2025-12-31,Region C,Blended,310,220,105,130,
+2025,2025-12-31,Online,Online,1800,1350,400,716,684

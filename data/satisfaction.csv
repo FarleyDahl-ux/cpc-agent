@@ -1,0 +1,31 @@
+reporting_period,delivery_mode,survey_item,pct_satisfied,n_respondents,organisation_avg_pct
+2024,Face to face,teacher_support,83,200,
+2024,Blended,teacher_support,79,55,
+2024,Online,teacher_support,66,340,
+2024,Face to face,assessment_clarity,75,200,
+2024,Blended,assessment_clarity,73,55,
+2024,Online,assessment_clarity,60,340,
+2024,Face to face,reasonable_workload,73,200,
+2024,Blended,reasonable_workload,71,55,
+2024,Online,reasonable_workload,67,340,
+2024,Face to face,content_relevance,85,200,
+2024,Blended,content_relevance,84,55,
+2024,Online,content_relevance,82,340,
+2024,Face to face,overall_course,81,200,
+2024,Blended,overall_course,79,55,
+2024,Online,overall_course,72,340,
+2025,Face to face,teacher_support,84,210,85
+2025,Blended,teacher_support,80,60,81
+2025,Online,teacher_support,61,380,72
+2025,Face to face,assessment_clarity,76,210,75
+2025,Blended,assessment_clarity,72,60,71
+2025,Online,assessment_clarity,58,380,63
+2025,Face to face,reasonable_workload,72,210,74
+2025,Blended,reasonable_workload,70,60,72
+2025,Online,reasonable_workload,66,380,68
+2025,Face to face,content_relevance,86,210,85
+2025,Blended,content_relevance,84,60,83
+2025,Online,content_relevance,81,380,80
+2025,Face to face,overall_course,82,210,83
+2025,Blended,overall_course,78,60,79
+2025,Online,overall_course,70,380,72
