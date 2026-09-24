@@ -179,7 +179,8 @@ def run_pipeline(
         evidence_records.append(record)
         log.log_event("evidence_status", finding_id=signal.id, status=record.evidence_status)
 
-    reviewed = gates.review_findings(evidence_records)
+    comments_by_id = {c.comment_id: c for c in screening_result.eligible}
+    reviewed = gates.review_findings(evidence_records, comments_by_id)
     accepted = [r for r in reviewed if r.reviewer_status in ("accept", "edit")]
 
     generated_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -197,6 +198,7 @@ def run_pipeline(
         snapshot_date,
         exceptions,
         log.run_dir,
+        analyst_name=gates.analyst_name,
     )
     log.log_event("brief_written", path=str(brief_path))
 

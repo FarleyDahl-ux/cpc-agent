@@ -10,6 +10,8 @@ from cpc_agent.evidence import (
     SUFFICIENT,
     assign_evidence_status,
     build_evidence_record,
+    humanize_measure,
+    readable_measure_label,
 )
 from cpc_agent.loaders import load_approved_sources
 from cpc_agent.metrics import calculate_metrics, flag_signals
@@ -69,3 +71,34 @@ def test_evidence_record_never_carries_quarantined_ids(signals_by_measure_segmen
     record = build_evidence_record(signal, aligned_ids=["FB003"], countervailing_ids=[], themes=["Teacher responsiveness and support"])
     assert "FB016" not in record.aligned_ids
     assert "FB018" not in record.aligned_ids
+
+
+def test_evidence_record_reviewer_field_defaults_empty(signals_by_measure_segment):
+    signal = signals_by_measure_segment[("teacher_support", "Online")]
+    record = build_evidence_record(signal, aligned_ids=[], countervailing_ids=[], themes=[])
+    assert record.reviewer == ""
+    record.reviewer = "Farley Dahl"
+    assert record.to_dict()["reviewer"] == "Farley Dahl"
+
+
+@pytest.mark.parametrize(
+    "measure,segment,expected",
+    [
+        ("teacher_support", "Online", "Teacher support satisfaction (Online)"),
+        ("assessment_clarity", "Online", "Assessment clarity satisfaction (Online)"),
+        ("unit_withdrawal_rate", "CWSU204", "Unit withdrawal rate (CWSU204)"),
+        ("segment_withdrawal_rate", "Online", "Withdrawal rate (Online)"),
+    ],
+)
+def test_readable_measure_label(measure, segment, expected):
+    assert readable_measure_label(measure, segment) == expected
+
+
+def test_humanize_measure_keeps_code_name_unchanged_in_records(signals_by_measure_segment):
+    # Readable labels are display-only: the stored measure/segment fields
+    # (and therefore evidence_records.json) must always keep the code name.
+    signal = signals_by_measure_segment[("teacher_support", "Online")]
+    record = build_evidence_record(signal, aligned_ids=[], countervailing_ids=[], themes=[])
+    assert record.measure == "teacher_support"
+    assert humanize_measure(record.measure) == "teacher support"
+    assert record.to_dict()["measure"] == "teacher_support"

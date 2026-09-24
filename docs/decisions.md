@@ -210,3 +210,59 @@ chosen and recorded here.
   not part of the shipped pipeline (CLAUDE.md's `src/cpc_agent/` structure
   in §3 has no slot for it, and it must never run as part of `pytest`,
   since it spends real API credits on every invocation).
+
+## Gate/brief usability pass — comment text, analyst name, readable labels, draft status
+
+- **Full comment text at the review gate comes only from `comments_by_id`,
+  built in `main.py` from `screening_result.eligible`.** Quarantined
+  comments are never in that dict by construction (screening.py filters
+  them out before anything downstream ever sees them), so
+  `Gates._print_linked_comments` cannot leak quarantined text even in
+  principle — there's no code path that could reach it, rather than a
+  check that has to remember to exclude it. An aligned/countervailing ID
+  with no entry in the dict (which `record_link`'s own validation should
+  already prevent) prints `"(comment text unavailable)"` instead of
+  crashing or guessing, which the test in `tests/test_gates.py` exercises
+  directly as a defence-in-depth case.
+- **The analyst's name is captured once, at the scope gate, and reused
+  everywhere else** (`Gates.analyst_name`), rather than asked again at the
+  findings-review or final-approval gates. `Gates` is a single instance
+  threaded through the whole run in `main.py`, so this is just reading
+  state set earlier in the same object — it avoids asking the same human
+  who they are three times in one run. Missing/blank input defaults to
+  `"(not provided)"` in both scripted and interactive mode, so a scripted
+  answers file that omits `analyst_name` (e.g. an older `answers.json`)
+  still runs rather than crashing.
+- **`EvidenceRecord` gained a `reviewer` field** (the analyst's name),
+  separate from the existing `reviewer_status`/`reviewer_note`, since none
+  of those meant "who reviewed this" and `evidence_records.json` should
+  carry that per CLAUDE.md §7's traceability intent. Added with a `""`
+  default so it's backwards compatible with any code constructing
+  `EvidenceRecord` positionally/without it (none currently does, but tests
+  didn't need updating for this reason alone).
+- **Bracket placeholder lines are now fully replaced, not kept as a
+  leading caption.** The earlier phase-5 approach (`anchor + "\n" +
+  generated`) kept the instructional bracket text from
+  `data/cpc_brief_template.txt` visible above the real content in every
+  section, which reads as an unfinished template even once populated.
+  Changed every bracket-anchor replacement to substitute the anchor
+  directly with the generated content. The two non-bracket instructional
+  sentences in section 3 ("For each signal: ..." / "Feedback is reported
+  experience...") are real prose, not template placeholders, and are kept.
+- **DRAFT/"(not approved)" removal is decision-gated, not automatic on any
+  brief write.** `populate_cpc_template` always writes the unmodified
+  template title (still a draft — final approval hasn't happened yet);
+  only `update_brief_status(path, "approve")` strips `DRAFT` and `(not
+  approved)` from the title, via one more `str.replace` on the now-fixed
+  title line. A `"return"` decision leaves the title untouched and only
+  changes the Status/Decision lines, so a returned brief still reads
+  clearly as an unapproved draft if it's reopened later.
+- **Readable labels (`evidence.humanize_measure`/`readable_measure_label`)
+  are display-only, applied at render time in `brief.py` and `gates.py`,
+  never written back into `EvidenceRecord.measure`/`.segment`.** This keeps
+  `evidence_records.json` machine-comparable against
+  `tests/fixtures/expected_results.json` (which uses code names) while the
+  brief and the interactive review prompts read naturally. Segment_
+  withdrawal_rate is labelled "Withdrawal rate (segment)" rather than
+  "Segment withdrawal rate (segment)" — the segment name is already in the
+  parenthetical, so repeating "segment" in the label was redundant.

@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import config
-from .evidence import EvidenceRecord
+from .evidence import EvidenceRecord, humanize_measure, readable_measure_label
 from .validation import ScopeContext
 
 STATUS_BY_DECISION = {
@@ -12,6 +12,9 @@ STATUS_BY_DECISION = {
     "approve": "Approved",
     "return": "Returned",
 }
+
+DRAFT_TITLE = "# DRAFT — Course Performance Workshop Brief (not approved)"
+APPROVED_TITLE = "# Course Performance Workshop Brief"
 
 
 def _scope_text(context: ScopeContext) -> str:
@@ -28,15 +31,17 @@ def _scope_text(context: ScopeContext) -> str:
 
 
 def _signal_table_row(record: EvidenceRecord) -> str:
+    label = readable_measure_label(record.measure, record.segment)
     return (
-        f"| {record.finding_id} | {record.measure} ({record.segment}) | {record.calculation} "
+        f"| {record.finding_id} | {label} | {record.calculation} "
         f"| {record.comparison_rule} | {record.source_file}, {record.period}, n={record.n:.0f} "
         f"| {record.evidence_status} |"
     )
 
 
 def _feedback_block(record: EvidenceRecord) -> str:
-    lines = [f"**{record.finding_id}** — {record.measure} ({record.segment})"]
+    label = readable_measure_label(record.measure, record.segment)
+    lines = [f"**{record.finding_id}** — {label}"]
     lines.append(f"- Aligned: {', '.join(record.aligned_ids) if record.aligned_ids else 'none'}")
     lines.append(
         f"- Countervailing: {', '.join(record.countervailing_ids) if record.countervailing_ids else 'none'}"
@@ -68,7 +73,7 @@ def _question_for(record: EvidenceRecord) -> str:
             f"rate for {record.segment} learners in {record.period}?"
         )
     else:
-        measure_label = record.measure.replace("_", " ")
+        measure_label = humanize_measure(record.measure)
         text = (
             f"What support or delivery conditions might be relevant to {measure_label} satisfaction "
             f"for {record.segment} learners in {record.period}?"
@@ -86,12 +91,17 @@ def populate_cpc_template(
     snapshot_date: str,
     exceptions: dict,
     output_dir: Path,
+    analyst_name: str = "(not provided)",
     template_path: Path = config.TEMPLATE_PATH,
 ) -> Path:
     """Writes runs/<run_id>/brief.md from accepted_records only. The brief
     is always written with status "Pending final approval" and decision
     "pending" — update_brief_status records the outcome of gate 9 once the
-    analyst has actually seen the file."""
+    analyst has actually seen the file.
+
+    Every template placeholder line written in square brackets is replaced
+    by its generated content (the placeholder text itself is removed, not
+    kept as a leftover caption)."""
     template = template_path.read_text(encoding="utf-8")
 
     text = template
@@ -105,11 +115,13 @@ def populate_cpc_template(
     text = text.replace("Input data version: [ ]", f"Input data version: {data_version}")
     text = text.replace("Instruction version: [ ]", f"Instruction version: {instruction_version}")
     text = text.replace("Generated: [date]", f"Generated: {generated_date}")
-    text = text.replace("Analyst: [ ]", "Analyst: (recorded in audit_log.jsonl)")
+    text = text.replace("Analyst: [ ]", f"Analyst: {analyst_name}")
     text = text.replace("Decision: pending / approved / returned", "Decision: pending")
 
-    scope_anchor = "[Files used, periods, any sources unavailable]"
-    text = text.replace(scope_anchor, scope_anchor + "\n" + _scope_text(context))
+    text = text.replace("[Files used, periods, any sources unavailable]", _scope_text(context))
+
+    section2_caption = "[Only findings the analyst has approved. Detailed evidence records are kept separately.]\n"
+    text = text.replace(section2_caption, "")
 
     table_anchor = "|---|---|---|---|---|---|"
     table_rows = "\n".join(_signal_table_row(r) for r in accepted_records) or "| — | no approved findings | | | | |"
@@ -119,14 +131,12 @@ def populate_cpc_template(
     feedback_body = "\n\n".join(_feedback_block(r) for r in accepted_records) or "No approved findings."
     text = text.replace(feedback_anchor, feedback_anchor + "\n\n" + feedback_body)
 
-    exceptions_anchor = "[Missing data, quarantined comments, low samples, unresolved issues]"
     exception_lines = _exception_lines(exceptions)
     exceptions_body = "\n".join(exception_lines) if exception_lines else "- None recorded."
-    text = text.replace(exceptions_anchor, exceptions_anchor + "\n" + exceptions_body)
+    text = text.replace("[Missing data, quarantined comments, low samples, unresolved issues]", exceptions_body)
 
-    questions_anchor = "[Neutral questions linked to signal IDs. No recommendations.]"
     questions_body = "\n".join(_question_for(r) for r in accepted_records) or "No approved findings to raise questions about."
-    text = text.replace(questions_anchor, questions_anchor + "\n" + questions_body)
+    text = text.replace("[Neutral questions linked to signal IDs. No recommendations.]", questions_body)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "brief.md"
@@ -134,13 +144,19 @@ def populate_cpc_template(
     return output_path
 
 
-def update_brief_status(brief_path: Path, decision: str, analyst_label: str = "(recorded in audit_log.jsonl)") -> None:
+def update_brief_status(brief_path: Path, decision: str) -> None:
     """Rewrites the Status/Decision lines in an already-written brief.md to
     reflect the final approval gate's outcome. Never sends, emails or
-    publishes the file — it is only edited in place, locally."""
+    publishes the file — it is only edited in place, locally.
+
+    On "approve", the "DRAFT" marker and "(not approved)" qualifier are
+    removed from the header, since the brief is no longer a draft awaiting
+    approval. On "return" (or if the brief is never approved), both are
+    left in place and the Status line reads "Returned"."""
     text = brief_path.read_text(encoding="utf-8")
     status = STATUS_BY_DECISION.get(decision, STATUS_BY_DECISION["pending"])
     text = text.replace(f"Status: {STATUS_BY_DECISION['pending']}", f"Status: {status}")
     text = text.replace("Decision: pending", f"Decision: {decision}")
-    text = text.replace("Analyst: (recorded in audit_log.jsonl)", f"Analyst: {analyst_label}")
+    if decision == "approve":
+        text = text.replace(DRAFT_TITLE, APPROVED_TITLE)
     brief_path.write_text(text, encoding="utf-8")

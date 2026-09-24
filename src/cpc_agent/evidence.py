@@ -73,11 +73,33 @@ class EvidenceRecord:
     themes: list[str] = field(default_factory=list)
     evidence_status: str = ""
     limitation: str = ""
+    reviewer: str = ""
     reviewer_status: str = "Pending"
     reviewer_note: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def humanize_measure(measure: str) -> str:
+    """Turns a code-name measure (e.g. 'teacher_support') into readable
+    words ('teacher support'), for display only. The stored `measure` field
+    on EvidenceRecord/Signal/evidence_records.json always keeps the code
+    name — this is never written back into any JSON output."""
+    return measure.replace("_", " ").strip()
+
+
+def readable_measure_label(measure: str, segment: str) -> str:
+    """A human-readable label for a signal's measure+segment, for display
+    in the brief and at the findings review gate only (e.g. "Teacher
+    support satisfaction (Online)"). JSON records keep the raw code names."""
+    if measure == "unit_withdrawal_rate":
+        base = "Unit withdrawal rate"
+    elif measure == "segment_withdrawal_rate":
+        base = "Withdrawal rate"
+    else:
+        base = f"{humanize_measure(measure).capitalize()} satisfaction"
+    return f"{base} ({segment})"
 
 
 def build_evidence_record(

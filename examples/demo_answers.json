@@ -1,4 +1,5 @@
 {
+  "analyst_name": "Demo Analyst",
   "scope_confirm": true,
   "blank_value": {
     "default": "exclude"

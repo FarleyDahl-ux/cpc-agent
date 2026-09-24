@@ -13,9 +13,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .audit import AuditLog
     from .evidence import EvidenceRecord
+    from .screening import EligibleComment
     from .validation import BlankValueIssue, LowSampleIssue, ReconciliationIssue
 
+from .evidence import readable_measure_label
+
 _TRUTHY = {"y", "yes", "true", "1"}
+_UNSPECIFIED_ANALYST = "(not provided)"
 
 
 class Gates:
@@ -23,6 +27,7 @@ class Gates:
         self.audit = audit
         self.scripted = answers_path is not None
         self.answers: dict = {}
+        self.analyst_name: str = ""
         if self.scripted:
             self.answers = json.loads(Path(answers_path).read_text(encoding="utf-8"))
 
@@ -41,12 +46,16 @@ class Gates:
         for _key, filename, present in context.files_found:
             print(f"  {filename}: {'found' if present else 'MISSING'}")
         if self.scripted:
+            name = str(self.answers.get("analyst_name", "")).strip()
+            self.analyst_name = name or _UNSPECIFIED_ANALYST
             raw = self.answers.get("scope_confirm", False)
             decision = raw is True or str(raw).strip().lower() in _TRUTHY
         else:
+            name = self._prompt("Your name (recorded for the audit trail and brief): ").strip()
+            self.analyst_name = name or _UNSPECIFIED_ANALYST
             answer = self._prompt("Confirm scope and proceed? [y/N]: ")
             decision = answer.lower() in _TRUTHY
-        self._log("scope_confirm", decision=decision)
+        self._log("scope_confirm", analyst=self.analyst_name, decision=decision)
         return decision
 
     # --- Validation pauses ------------------------------------------------
@@ -106,7 +115,24 @@ class Gates:
 
     # --- 7. Findings review gate --------------------------------------------
 
-    def review_findings(self, records: list["EvidenceRecord"]) -> list["EvidenceRecord"]:
+    def _print_linked_comments(self, label: str, comment_ids: list[str], comments_by_id: dict[str, "EligibleComment"]) -> None:
+        if not comment_ids:
+            print(f"  {label}: none")
+            return
+        print(f"  {label}:")
+        for comment_id in comment_ids:
+            comment = comments_by_id.get(comment_id)
+            # comments_by_id is built only from eligible (non-quarantined)
+            # comments (see main.py) — quarantined text can never reach here.
+            text = comment.text if comment is not None else "(comment text unavailable)"
+            print(f"    {comment_id}: {text}")
+
+    def review_findings(
+        self,
+        records: list["EvidenceRecord"],
+        comments_by_id: dict[str, "EligibleComment"] | None = None,
+    ) -> list["EvidenceRecord"]:
+        comments_by_id = comments_by_id or {}
         table = self.answers.get("findings_review", {}) if self.scripted else {}
         for record in records:
             if self.scripted:
@@ -118,16 +144,19 @@ class Gates:
                     decision = entry
                     note = ""
             else:
-                print(f"--- {record.finding_id}: {record.measure} ({record.segment}) — {record.evidence_status} ---")
+                label = readable_measure_label(record.measure, record.segment)
+                print(f"--- {record.finding_id}: {label} — {record.evidence_status} ---")
                 print(f"  {record.calculation}; {record.comparison_rule}")
-                print(f"  Aligned: {record.aligned_ids} | Countervailing: {record.countervailing_ids}")
+                self._print_linked_comments("Aligned", record.aligned_ids, comments_by_id)
+                self._print_linked_comments("Countervailing", record.countervailing_ids, comments_by_id)
                 answer = self._prompt("accept / edit / reject: ").lower()
                 decision = answer if answer in ("accept", "edit", "reject") else "accept"
                 note = self._prompt("Note: ") if decision == "edit" else ""
             decision = decision if decision in ("accept", "edit", "reject") else "accept"
+            record.reviewer = self.analyst_name or _UNSPECIFIED_ANALYST
             record.reviewer_status = decision
             record.reviewer_note = note
-            self._log("findings_review", finding_id=record.finding_id, decision=decision, note=note)
+            self._log("findings_review", finding_id=record.finding_id, analyst=record.reviewer, decision=decision, note=note)
         return records
 
     # --- 9. Final approval gate --------------------------------------------

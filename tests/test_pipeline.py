@@ -114,6 +114,9 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     assert by_id["S3"]["evidence_status"] == "No qualitative evidence"
     assert by_id["S4"]["evidence_status"] == "Limited"
     assert all(r["reviewer_status"] == "accept" for r in evidence_records)
+    assert all(r["reviewer"] == "Demo Analyst" for r in evidence_records)
+    # JSON records always keep the raw code names, never the readable brief labels.
+    assert by_id["S1"]["measure"] == "teacher_support"
 
     exceptions = json.loads((run_dir / "exception_log.json").read_text(encoding="utf-8"))
     quarantined_ids = {q["comment_id"] for q in exceptions["quarantined"]}
@@ -135,6 +138,23 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
         assert term not in brief_text
     assert "Status: Approved" in brief_text
     assert "S1" in brief_text and "S4" in brief_text
+    assert "Analyst: Demo Analyst" in brief_text
+
+    # Final decision was "approve" (see examples/demo_answers.json): the
+    # DRAFT marker and "(not approved)" qualifier must be gone.
+    assert "DRAFT" not in brief_text
+    assert "(not approved)" not in brief_text
+    assert "# Course Performance Workshop Brief" in brief_text
+
+    # No leftover bracket placeholder lines from the template.
+    assert "[Files used, periods, any sources unavailable]" not in brief_text
+    assert "[Only findings the analyst has approved" not in brief_text
+    assert "[Missing data, quarantined comments, low samples, unresolved issues]" not in brief_text
+    assert "[Neutral questions linked to signal IDs. No recommendations.]" not in brief_text
+
+    # Readable measure labels, not raw code names, in the brief.
+    assert "Teacher support satisfaction (Online)" in brief_text
+    assert "teacher_support (Online)" not in brief_text
 
 
 def test_end_to_end_run_never_estimates_region_c_withdrawals(tmp_path):
