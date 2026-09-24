@@ -52,3 +52,27 @@ chosen and recorded here.
 - **`organisation_avg_pct` is never used to gate reconciliation or
   low-sample PAUSE checks** — consistent with the phase 1 decision above,
   since it is a comparison input to flagging, not a status count.
+
+## Phase 3 — Screening and evidence status
+
+- **A comment can carry both quarantine reasons at once** (`reasons` is a
+  list, joined for the exception log). Neither trap comment in the sample
+  data needs this, but a comment could plausibly contain both a name and
+  injected text, and the exception log should say so rather than picking one.
+- **Identifying-information regex is title-plus-capitalised-name only**
+  (`Mr|Mrs|Ms|Miss|Dr` followed by 1–2 capitalised words), plus email and a
+  loose digit-run phone pattern. This is deliberately narrow: a broader
+  "any capitalised two-word phrase" rule would quarantine ordinary text
+  (unit names, place names) and defeat the purpose of a *draft* brief the
+  analyst can still act on. Documented as a known limitation — the README
+  lists pre-LLM ML-based redaction as proposed, not built, for exactly this
+  reason.
+- **`build_evidence_record` deduplicates and sorts aligned/countervailing
+  IDs and themes** before storing them, so evidence_records.json is stable
+  and reproducible across runs given the same investigation output.
+- **`review_required_reason` is a plain optional string parameter**, not an
+  auto-detected condition. CLAUDE.md's "Review required" trigger (an
+  unresolved privacy/demographic/data condition) is a judgement call about
+  a specific finding; nothing in the deterministic pipeline currently
+  infers it automatically, so it is left as a hook the investigation stage
+  (phase 4) or a human gate can set explicitly, rather than guessed at.

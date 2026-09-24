@@ -1,1 +1,111 @@
-"""Deterministic evidence-status assignment and evidence record construction. Built in phase 3."""
+"""Deterministic evidence-status assignment and evidence record construction.
+
+Evidence status is decided entirely in code (data_dictionary.txt "Evidence
+status"), never by the LLM — the LLM (investigate.py) only proposes aligned/
+countervailing links; this module applies the precedence rule to whatever
+links survive.
+"""
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+
+from . import config
+from .metrics import Signal
+
+REVIEW_REQUIRED = "Review required"
+MIXED = "Mixed"
+SUFFICIENT = "Sufficient"
+LIMITED = "Limited"
+NO_QUALITATIVE_EVIDENCE = "No qualitative evidence"
+
+
+def assign_evidence_status(
+    aligned_ids: list[str],
+    countervailing_ids: list[str],
+    review_required_reason: str | None = None,
+) -> str:
+    """Applies the evidence-status precedence order, most conditions first:
+    Review required -> Mixed -> Sufficient -> Limited -> No qualitative
+    evidence. IDs are deduplicated (unique respondents)."""
+    if review_required_reason:
+        return REVIEW_REQUIRED
+    aligned = set(aligned_ids)
+    countervailing = set(countervailing_ids)
+    if aligned and countervailing:
+        return MIXED
+    if not countervailing and len(aligned) >= config.EVIDENCE_SUFFICIENT_MIN_ALIGNED:
+        return SUFFICIENT
+    if not countervailing and len(aligned) >= config.EVIDENCE_LIMITED_MIN_ALIGNED:
+        return LIMITED
+    return NO_QUALITATIVE_EVIDENCE
+
+
+_DEFAULT_LIMITATIONS = {
+    REVIEW_REQUIRED: "",  # supplied by the caller via review_required_reason
+    MIXED: (
+        "Aligned and countervailing feedback were both found; feedback is reported "
+        "experience and does not establish cause."
+    ),
+    SUFFICIENT: (
+        "Based on a small number of unique comments; not a representative sample of "
+        "all learners."
+    ),
+    LIMITED: (
+        "Based on only one or two eligible comments; not a representative sample of "
+        "all learners."
+    ),
+    NO_QUALITATIVE_EVIDENCE: "No eligible comments could reasonably be linked to this signal.",
+}
+
+
+@dataclass
+class EvidenceRecord:
+    finding_id: str
+    measure: str
+    segment: str
+    calculation: str
+    comparison_rule: str
+    source_file: str
+    period: str
+    n: float
+    aligned_ids: list[str] = field(default_factory=list)
+    countervailing_ids: list[str] = field(default_factory=list)
+    themes: list[str] = field(default_factory=list)
+    evidence_status: str = ""
+    limitation: str = ""
+    reviewer_status: str = "Pending"
+    reviewer_note: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def build_evidence_record(
+    signal: Signal,
+    aligned_ids: list[str],
+    countervailing_ids: list[str],
+    themes: list[str],
+    review_required_reason: str | None = None,
+    extra_limitation: str = "",
+) -> EvidenceRecord:
+    status = assign_evidence_status(aligned_ids, countervailing_ids, review_required_reason)
+    limitation = review_required_reason if status == REVIEW_REQUIRED else _DEFAULT_LIMITATIONS[status]
+    if extra_limitation:
+        limitation = f"{limitation} {extra_limitation}".strip()
+    return EvidenceRecord(
+        finding_id=signal.id,
+        measure=signal.measure,
+        segment=signal.segment,
+        calculation=signal.calculation,
+        comparison_rule=signal.comparison_rule,
+        source_file=signal.source_file,
+        period=signal.period,
+        n=signal.n,
+        aligned_ids=sorted(set(aligned_ids)),
+        countervailing_ids=sorted(set(countervailing_ids)),
+        themes=sorted(set(themes)),
+        evidence_status=status,
+        limitation=limitation,
+        reviewer_status="Pending",
+        reviewer_note="",
+    )
