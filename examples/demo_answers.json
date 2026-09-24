@@ -1,0 +1,19 @@
+{
+  "scope_confirm": true,
+  "blank_value": {
+    "default": "exclude"
+  },
+  "reconciliation": {
+    "default": "exclude"
+  },
+  "low_sample": {
+    "default": "exclude"
+  },
+  "ask_analyst": {
+    "default": "No further information is available beyond the recorded evidence; use judgement and note the limitation."
+  },
+  "findings_review": {
+    "default": "accept"
+  },
+  "final_approval": "approve"
+}

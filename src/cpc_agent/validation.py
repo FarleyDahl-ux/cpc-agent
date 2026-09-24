@@ -118,6 +118,13 @@ def _segment_of(filename: str, row: dict[str, str]) -> dict[str, str]:
     return {}
 
 
+def segment_of(filename: str, row: dict[str, str]) -> dict[str, str]:
+    """Public wrapper for the segment-identifying fields of a row, so
+    callers (e.g. main.py, applying an analyst's exclude decision) can
+    build the same key used internally without duplicating field lists."""
+    return _segment_of(filename, row)
+
+
 def find_blank_required_values(sources: LoadedSources) -> list[BlankValueIssue]:
     """Finds blank values in required-value fields of the three required
     files. Never estimates or fills a value — the caller (gates.py) must ask
