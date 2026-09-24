@@ -27,3 +27,28 @@ chosen and recorded here.
   flagging rule for that row, it does not halt or pause the run. This is
   the more conservative reading available: it avoids inventing/estimating a
   value while not blocking the run on an absence the data model expects.
+
+## Phase 2 — Validation and metrics
+
+- **Segment identifier for course_metrics-based signals is `delivery_region`,
+  not `delivery_mode`.** In the sample data `delivery_region` values
+  (Region A, Region B, Region C, Online) are already unique per row, while
+  `delivery_mode` is shared by two regions ("Face to face" for both Region A
+  and Region B). Using `delivery_region` as the segment label matches
+  `tests/fixtures/expected_results.json` (segment "Online" for S4) and keeps
+  segment and unit withdrawal signals traceable to one row.
+- **"gap" for a satisfaction signal = the more negative of gap-vs-org and
+  gap-vs-previous-year**, used for both the reported figure and the S1/S2
+  ordering rule ("largest gap first"). Both qualifying signals in the test
+  data happen to have the org-average gap as the larger one, so this reading
+  reproduces `expected_results.json` exactly; it also generalises sensibly
+  to a signal that only trips the previous-year rule.
+- **Blank required values are excluded from `reconcile_status_counts` and
+  `flag_signals` inputs, not treated as errors by those functions.** The
+  PAUSE for a blank value happens once, in `find_blank_required_values`;
+  downstream deterministic functions assume the analyst's exclude/abort
+  decision has already been applied by the caller (gates.py, phase 5) and
+  simply skip rows that are missing values, rather than re-raising.
+- **`organisation_avg_pct` is never used to gate reconciliation or
+  low-sample PAUSE checks** — consistent with the phase 1 decision above,
+  since it is a comparison input to flagging, not a status count.
