@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .screening import EligibleComment
     from .validation import BlankValueIssue, LowSampleIssue, ReconciliationIssue
 
-from .evidence import readable_measure_label
+from .evidence import ANALYST_EXCERPT_SELECTION, AUTOMATIC_EXCERPT_SELECTION, readable_measure_label
 
 _TRUTHY = {"y", "yes", "true", "1"}
 _UNSPECIFIED_ANALYST = "(not provided)"
@@ -29,17 +29,23 @@ def _default_excerpts(comment_ids: list[str]) -> list[str]:
     return comment_ids[:MAX_EXCERPTS]
 
 
-def _resolve_excerpts(requested: list[str] | None, linked_ids: list[str]) -> list[str]:
+def _resolve_excerpts(requested: list[str] | None, linked_ids: list[str]) -> tuple[list[str], bool]:
     """Resolves an analyst's excerpt choice against the comments actually
-    linked to this signal. `requested=None` means "use the default"; an
-    explicit list (scripted or interactive) is filtered to only the IDs
-    that are genuinely linked (never invents an ID) and capped at
-    MAX_EXCERPTS, preserving the order the analyst gave."""
+    linked to this signal. `requested=None` means "the analyst made no
+    choice" -> use the default (first two by ID), and the returned flag is
+    True. An explicit list (scripted or interactive, even an empty one) is
+    filtered to only the IDs that are genuinely linked (never invents an
+    ID) and capped at MAX_EXCERPTS, preserving the order given; the flag is
+    False, since a real choice was made even if it resolved to nothing."""
     if requested is None:
-        return _default_excerpts(linked_ids)
+        return _default_excerpts(linked_ids), True
     linked_set = set(linked_ids)
     filtered = [cid for cid in dict.fromkeys(requested) if cid in linked_set]
-    return filtered[:MAX_EXCERPTS]
+    return filtered[:MAX_EXCERPTS], False
+
+
+def _excerpt_selection_label(was_automatic: bool) -> str:
+    return AUTOMATIC_EXCERPT_SELECTION if was_automatic else ANALYST_EXCERPT_SELECTION
 
 
 class Gates:
@@ -147,16 +153,16 @@ class Gates:
             text = comment.text if comment is not None else "(comment text unavailable)"
             print(f"    {comment_id}: {text}")
 
-    def _choose_excerpts_interactively(self, label: str, comment_ids: list[str]) -> list[str]:
+    def _choose_excerpts_interactively(self, label: str, comment_ids: list[str]) -> tuple[list[str], bool]:
         if not comment_ids:
-            return []
+            return [], True
         default = _default_excerpts(comment_ids)
         answer = self._prompt(
             f"Which up to {MAX_EXCERPTS} {label} comment(s) should appear as excerpts in the brief "
             f"(comma-separated IDs, default {', '.join(default)}): "
         ).strip()
         if not answer:
-            return default
+            return _resolve_excerpts(None, comment_ids)
         requested = [c.strip() for c in answer.split(",") if c.strip()]
         return _resolve_excerpts(requested, comment_ids)
 
@@ -178,8 +184,10 @@ class Gates:
                     decision = entry
                     note = ""
                     excerpts_entry = {}
-                aligned_excerpts = _resolve_excerpts(excerpts_entry.get("aligned"), record.aligned_ids)
-                countervailing_excerpts = _resolve_excerpts(excerpts_entry.get("countervailing"), record.countervailing_ids)
+                aligned_excerpts, aligned_auto = _resolve_excerpts(excerpts_entry.get("aligned"), record.aligned_ids)
+                countervailing_excerpts, countervailing_auto = _resolve_excerpts(
+                    excerpts_entry.get("countervailing"), record.countervailing_ids
+                )
             else:
                 label = readable_measure_label(record.measure, record.segment)
                 print(f"--- {record.finding_id}: {label} — {record.evidence_status} ---")
@@ -189,14 +197,18 @@ class Gates:
                 answer = self._prompt("accept / edit / reject: ").lower()
                 decision = answer if answer in ("accept", "edit", "reject") else "accept"
                 note = self._prompt("Note: ") if decision == "edit" else ""
-                aligned_excerpts = self._choose_excerpts_interactively("aligned", record.aligned_ids)
-                countervailing_excerpts = self._choose_excerpts_interactively("countervailing", record.countervailing_ids)
+                aligned_excerpts, aligned_auto = self._choose_excerpts_interactively("aligned", record.aligned_ids)
+                countervailing_excerpts, countervailing_auto = self._choose_excerpts_interactively(
+                    "countervailing", record.countervailing_ids
+                )
             decision = decision if decision in ("accept", "edit", "reject") else "accept"
             record.reviewer = self.analyst_name or _UNSPECIFIED_ANALYST
             record.reviewer_status = decision
             record.reviewer_note = note
             record.aligned_excerpt_ids = aligned_excerpts
             record.countervailing_excerpt_ids = countervailing_excerpts
+            record.aligned_excerpt_selection = _excerpt_selection_label(aligned_auto)
+            record.countervailing_excerpt_selection = _excerpt_selection_label(countervailing_auto)
             self._log(
                 "findings_review",
                 finding_id=record.finding_id,
@@ -204,7 +216,9 @@ class Gates:
                 decision=decision,
                 note=note,
                 aligned_excerpt_ids=aligned_excerpts,
+                aligned_excerpt_selection=record.aligned_excerpt_selection,
                 countervailing_excerpt_ids=countervailing_excerpts,
+                countervailing_excerpt_selection=record.countervailing_excerpt_selection,
             )
         return records
 

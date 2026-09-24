@@ -18,6 +18,9 @@ SUFFICIENT = "Sufficient"
 LIMITED = "Limited"
 NO_QUALITATIVE_EVIDENCE = "No qualitative evidence"
 
+AUTOMATIC_EXCERPT_SELECTION = "automatic selection (first two by ID)"
+ANALYST_EXCERPT_SELECTION = "analyst selection"
+
 
 def assign_evidence_status(
     aligned_ids: list[str],
@@ -74,6 +77,8 @@ class EvidenceRecord:
     countervailing_ids: list[str] = field(default_factory=list)
     aligned_excerpt_ids: list[str] = field(default_factory=list)
     countervailing_excerpt_ids: list[str] = field(default_factory=list)
+    aligned_excerpt_selection: str = AUTOMATIC_EXCERPT_SELECTION
+    countervailing_excerpt_selection: str = AUTOMATIC_EXCERPT_SELECTION
     themes: list[str] = field(default_factory=list)
     evidence_status: str = ""
     limitation: str = ""

@@ -207,18 +207,23 @@ def test_default_excerpts_is_first_two_by_id():
 
 
 def test_resolve_excerpts_none_means_use_default():
-    assert _resolve_excerpts(None, ["FB003", "FB007", "FB011"]) == ["FB003", "FB007"]
+    ids, was_automatic = _resolve_excerpts(None, ["FB003", "FB007", "FB011"])
+    assert ids == ["FB003", "FB007"]
+    assert was_automatic is True
 
 
 def test_resolve_excerpts_never_invents_an_id_not_actually_linked():
     # FB999 was never linked to this signal — it must be dropped, not shown.
-    assert _resolve_excerpts(["FB999", "FB007"], ["FB003", "FB007", "FB011"]) == ["FB007"]
+    ids, was_automatic = _resolve_excerpts(["FB999", "FB007"], ["FB003", "FB007", "FB011"])
+    assert ids == ["FB007"]
+    assert was_automatic is False  # an explicit (if partly invalid) choice was made
 
 
 def test_resolve_excerpts_caps_at_max_excerpts():
-    result = _resolve_excerpts(["FB003", "FB007", "FB011"], ["FB003", "FB007", "FB011"])
-    assert len(result) == MAX_EXCERPTS
-    assert result == ["FB003", "FB007"]
+    ids, was_automatic = _resolve_excerpts(["FB003", "FB007", "FB011"], ["FB003", "FB007", "FB011"])
+    assert len(ids) == MAX_EXCERPTS
+    assert ids == ["FB003", "FB007"]
+    assert was_automatic is False
 
 
 def test_scripted_findings_review_defaults_excerpts_to_first_two(tmp_path):
@@ -232,6 +237,8 @@ def test_scripted_findings_review_defaults_excerpts_to_first_two(tmp_path):
     reviewed = gates.review_findings([record])
     assert reviewed[0].aligned_excerpt_ids == ["FB003", "FB007"]
     assert reviewed[0].countervailing_excerpt_ids == ["FB005", "FB019"]
+    assert reviewed[0].aligned_excerpt_selection == "automatic selection (first two by ID)"
+    assert reviewed[0].countervailing_excerpt_selection == "automatic selection (first two by ID)"
 
 
 def test_scripted_findings_review_respects_explicit_excerpt_choice(tmp_path):
@@ -252,6 +259,8 @@ def test_scripted_findings_review_respects_explicit_excerpt_choice(tmp_path):
     reviewed = gates.review_findings([record])
     assert reviewed[0].aligned_excerpt_ids == ["FB011", "FB015"]
     assert reviewed[0].countervailing_excerpt_ids == ["FB019"]
+    assert reviewed[0].aligned_excerpt_selection == "analyst selection"
+    assert reviewed[0].countervailing_excerpt_selection == "analyst selection"
 
 
 def test_scripted_findings_review_ignores_excerpt_ids_not_actually_linked(tmp_path):
@@ -299,3 +308,51 @@ def test_interactive_findings_review_blank_excerpt_answer_uses_default(monkeypat
     reviewed = gates.review_findings([record], comments_by_id={})
 
     assert reviewed[0].aligned_excerpt_ids == ["FB003", "FB007"]
+    assert reviewed[0].aligned_excerpt_selection == "automatic selection (first two by ID)"
+
+
+def test_excerpt_selection_label_is_independent_per_side(tmp_path):
+    # Analyst picks aligned explicitly but leaves countervailing to the default.
+    path = _write_answers(
+        tmp_path,
+        {"findings_review": {"S1": {"decision": "accept", "excerpts": {"aligned": ["FB011", "FB015"]}}}},
+    )
+    gates = Gates(str(path))
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+        aligned_ids=["FB003", "FB007", "FB011", "FB015"], countervailing_ids=["FB005", "FB019"],
+    )
+    reviewed = gates.review_findings([record])
+    assert reviewed[0].aligned_excerpt_ids == ["FB011", "FB015"]
+    assert reviewed[0].aligned_excerpt_selection == "analyst selection"
+    assert reviewed[0].countervailing_excerpt_ids == ["FB005", "FB019"]
+    assert reviewed[0].countervailing_excerpt_selection == "automatic selection (first two by ID)"
+
+
+def test_findings_review_audit_log_records_excerpt_selection(tmp_path):
+    from cpc_agent.audit import AuditLog
+
+    audit = AuditLog("run-x", runs_dir=tmp_path)
+    path = _write_answers(
+        tmp_path,
+        {"findings_review": {"S1": {"decision": "accept", "excerpts": {"aligned": ["FB011"]}}}},
+    )
+    gates = Gates(str(path), audit=audit)
+    gates.analyst_name = "Farley Dahl"
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+        aligned_ids=["FB003", "FB007", "FB011"], countervailing_ids=["FB005"],
+    )
+    gates.review_findings([record])
+    audit.close()
+
+    lines = (tmp_path / "run-x" / "audit_log.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    events = [json.loads(line) for line in lines]
+    review_event = next(e for e in events if e.get("gate") == "findings_review")
+    assert review_event["aligned_excerpt_ids"] == ["FB011"]
+    assert review_event["aligned_excerpt_selection"] == "analyst selection"
+    assert review_event["countervailing_excerpt_ids"] == ["FB005"]
+    assert review_event["countervailing_excerpt_selection"] == "automatic selection (first two by ID)"
+    assert review_event["analyst"] == "Farley Dahl"

@@ -53,6 +53,28 @@ class ScreeningResult:
     quarantined: list[QuarantinedComment] = field(default_factory=list)
 
 
+_QUARANTINE_SUMMARIES = {
+    IDENTIFYING_INFORMATION: "A comment was held back from review because it appeared to identify a person.",
+    POSSIBLE_INJECTION: (
+        "A comment was held back from review because it looked like an attempt to change how "
+        "this tool behaves, rather than genuine feedback."
+    ),
+}
+_QUARANTINE_SUMMARY_FALLBACK = "A comment was held back from review."
+
+
+def quarantine_summary(reasons: list[str]) -> str:
+    """A plain-language sentence for the brief's exceptions section — never
+    the comment_id or the comment text, just why something was held back.
+    Technical reason codes stay in exception_log.json."""
+    phrases: list[str] = []
+    for reason in reasons:
+        phrase = _QUARANTINE_SUMMARIES.get(reason, _QUARANTINE_SUMMARY_FALLBACK)
+        if phrase not in phrases:
+            phrases.append(phrase)
+    return " ".join(phrases) if phrases else _QUARANTINE_SUMMARY_FALLBACK
+
+
 def _contains_identifying_information(text: str) -> bool:
     return bool(
         TITLE_NAME_PATTERN.search(text)

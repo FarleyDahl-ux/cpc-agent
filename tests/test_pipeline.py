@@ -117,6 +117,11 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     assert all(r["reviewer"] == "Demo Analyst" for r in evidence_records)
     # JSON records always keep the raw code names, never the readable brief labels.
     assert by_id["S1"]["measure"] == "teacher_support"
+    # The analyst made no excerpt choice in examples/demo_answers.json -> automatic default,
+    # recorded per side, alongside the full linked set (not just the excerpt subset).
+    assert by_id["S1"]["aligned_excerpt_ids"] == by_id["S1"]["aligned_ids"][:2]
+    assert by_id["S1"]["aligned_excerpt_selection"] == "automatic selection (first two by ID)"
+    assert by_id["S1"]["aligned_ids"] == ["FB003", "FB007", "FB011", "FB015"]  # full linked set retained
 
     exceptions = json.loads((run_dir / "exception_log.json").read_text(encoding="utf-8"))
     quarantined_ids = {q["comment_id"] for q in exceptions["quarantined"]}
@@ -124,7 +129,10 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     for q in exceptions["quarantined"]:
         assert "Hughes" not in json.dumps(q)
         assert "Ignore all previous instructions" not in json.dumps(q)
+        assert q["summary"]  # plain-language summary always present
     assert any("Region C" in e["detail"] for e in exceptions["exclusions"])
+    region_c_exclusion = next(e for e in exceptions["exclusions"] if "Region C" in e["detail"])
+    assert region_c_exclusion["summary"] == "Region C blended delivery was excluded because the 2025 withdrawal figure was missing."
 
     audit_lines = (run_dir / "audit_log.jsonl").read_text(encoding="utf-8").strip().splitlines()
     events = [json.loads(line) for line in audit_lines]
@@ -156,6 +164,12 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     assert "Teacher support satisfaction (Online)" in brief_text
     assert "teacher_support (Online)" not in brief_text
 
+    # "What's not included" is plain language; technical field syntax stays
+    # in exception_log.json only.
+    assert "Region C blended delivery was excluded because the 2025 withdrawal figure was missing." in brief_text
+    assert "delivery_region=Region C" not in brief_text
+    assert "reporting_period=2025" not in brief_text
+
     # brief.html: same guarantees, plus HTML-specific ones (excerpts, gauges).
     html_text = (run_dir / "brief.html").read_text(encoding="utf-8")
     for term in FORBIDDEN_STRINGS:
@@ -169,6 +183,20 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     assert 'style="width:61%"' in html_text  # S1's gauge fill, computed from real data
     assert "Teacher support satisfaction" in html_text
     assert "teacher_support" not in html_text
+
+    # Plain-language exceptions in the HTML brief too, not the technical detail.
+    assert "Region C blended delivery was excluded because the 2025 withdrawal figure was missing." in html_text
+    assert "delivery_region=Region C" not in html_text
+
+    # No excerpt choice was made in examples/demo_answers.json -> automatic default, labelled as such.
+    assert "Excerpts: automatic selection (first two by ID)." in html_text
+
+    # brief.html works offline: no external resources at all.
+    assert "googleapis" not in html_text
+    assert "<link" not in html_text
+    assert "https://" not in html_text
+    assert "Public Sans" not in html_text
+    assert "Source Serif 4" not in html_text
 
 
 def test_end_to_end_run_never_estimates_region_c_withdrawals(tmp_path):

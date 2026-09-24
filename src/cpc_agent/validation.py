@@ -62,6 +62,71 @@ def _is_blank(value: str | None) -> bool:
     return value is None or value.strip() == ""
 
 
+# --- Plain-language summaries -------------------------------------------
+#
+# These produce the wording shown to a human reader (the brief's "What's
+# not included" section). The technical detail string built in main.py
+# (field names, key=value pairs) stays in exception_log.json only — it is
+# never shown in the brief.
+
+_FIELD_READABLE = {
+    "withdrawals": "withdrawal",
+    "enrolments": "enrolment",
+    "completions": "completion",
+    "in_progress": "in-progress",
+    "commencements": "commencement",
+    "n_respondents": "respondent count",
+    "pct_satisfied": "satisfaction",
+    "organisation_avg_pct": "organisation average",
+}
+
+
+def _field_readable(field_name: str) -> str:
+    return _FIELD_READABLE.get(field_name, field_name.replace("_", " "))
+
+
+def _segment_phrase(segment: dict[str, str]) -> str:
+    """A short plain-language phrase identifying a segment, e.g. "Region C
+    blended delivery", "Online teacher support results", "CWSU204"."""
+    if "delivery_region" in segment and "delivery_mode" in segment:
+        return f"{segment['delivery_region']} {segment['delivery_mode'].lower()} delivery"
+    if "delivery_mode" in segment and "survey_item" in segment:
+        item = segment["survey_item"].replace("_", " ")
+        return f"{segment['delivery_mode']} {item} results"
+    if "unit_code" in segment:
+        return segment["unit_code"]
+    return ", ".join(f"{k}={v}" for k, v in segment.items())
+
+
+def blank_value_summary(issue: "BlankValueIssue") -> str:
+    period = issue.segment.get("reporting_period", "")
+    return f"{_segment_phrase(issue.segment)} was excluded because the {period} {_field_readable(issue.field)} figure was missing."
+
+
+def reconciliation_summary(issue: "ReconciliationIssue") -> str:
+    period = issue.segment.get("reporting_period", "")
+    return (
+        f"{_segment_phrase(issue.segment)} was excluded because its {period} enrolment figures "
+        "didn't add up (a reconciliation check failed)."
+    )
+
+
+def low_sample_excluded_summary(issue: "LowSampleIssue") -> str:
+    period = issue.segment.get("reporting_period", "")
+    return (
+        f"{_segment_phrase(issue.segment)} was excluded because fewer than "
+        f"{config.SATISFACTION_MIN_N} people responded in {period}."
+    )
+
+
+def low_sample_proceeded_summary(issue: "LowSampleIssue") -> str:
+    period = issue.segment.get("reporting_period", "")
+    return (
+        f"{_segment_phrase(issue.segment)} was included with caution because fewer than "
+        f"{config.SATISFACTION_MIN_N} people responded in {period}."
+    )
+
+
 def validate_schema(sources: LoadedSources) -> None:
     """Raises HaltError if a required file, or a required column within any
     present file (required or optional), is missing."""

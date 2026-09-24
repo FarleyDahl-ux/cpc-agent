@@ -1,5 +1,6 @@
-"""Fills data/cpc_brief_template.txt (brief.md) and docs/brief_mockup.html's
-design (brief.html) from accepted/edited evidence records only."""
+"""Fills data/cpc_brief_template.txt (brief.md) and the packaged
+src/cpc_agent/templates/brief.css design (brief.html) from accepted/edited
+evidence records only."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -20,7 +21,6 @@ STATUS_BY_DECISION = {
 DRAFT_TITLE = "# DRAFT — Course Performance Workshop Brief (not approved)"
 APPROVED_TITLE = "# Course Performance Workshop Brief"
 
-MOCKUP_PATH = config.BASE_DIR / "docs" / "brief_mockup.html"
 MAX_HTML_EXCERPTS = 2
 
 
@@ -60,19 +60,21 @@ def _feedback_block(record: EvidenceRecord) -> str:
     return "\n".join(lines)
 
 
-def _exception_details(exceptions: dict) -> list[str]:
-    details: list[str] = []
+def _exception_summaries(exceptions: dict) -> list[str]:
+    """Plain-language summaries only — never the technical `detail` string
+    (field names, key=value pairs), which stays in exception_log.json."""
+    summaries: list[str] = []
     for entry in exceptions.get("exclusions", []):
-        details.append(entry["detail"])
+        summaries.append(entry.get("summary", entry["detail"]))
     for entry in exceptions.get("quarantined", []):
-        details.append(entry["detail"])
+        summaries.append(entry.get("summary", entry["detail"]))
     for entry in exceptions.get("limitations", []):
-        details.append(entry["detail"])
-    return details
+        summaries.append(entry.get("summary", entry["detail"]))
+    return summaries
 
 
 def _exception_lines(exceptions: dict) -> list[str]:
-    return [f"- {detail}" for detail in _exception_details(exceptions)]
+    return [f"- {summary}" for summary in _exception_summaries(exceptions)]
 
 
 def _question_text(record: EvidenceRecord) -> str:
@@ -199,11 +201,14 @@ def _format_date(iso_date: str) -> str:
     return f"{parsed.day} {parsed.strftime('%B %Y')}"
 
 
-def _load_mockup_style(mockup_path: Path) -> str:
-    html_text = mockup_path.read_text(encoding="utf-8")
-    start = html_text.index("<style>")
-    end = html_text.index("</style>") + len("</style>")
-    return html_text[start:end]
+def _load_brief_css(css_path: Path) -> str:
+    """Reads the packaged brief stylesheet (src/cpc_agent/templates/brief.css)
+    and wraps it in a <style> tag. Reading from the package (not
+    docs/brief_mockup.html) means brief.html generation never depends on a
+    docs/ file being present at runtime; the mockup stays in docs/ purely
+    as a human-readable design preview."""
+    css_text = css_path.read_text(encoding="utf-8")
+    return f"<style>\n{css_text}</style>"
 
 
 def _signal_kind(measure: str) -> str:
@@ -306,6 +311,15 @@ def _excerpt_blockquotes(excerpt_ids: list[str], comments_by_id: dict[str, Eligi
     return "\n        ".join(parts)
 
 
+def _excerpt_selection_note(excerpt_ids: list[str], selection_label: str) -> str:
+    """A small caption crediting how the shown excerpt(s) were chosen — the
+    analyst's own choice, or the automatic first-two-by-ID default when
+    they made none. Omitted when there is nothing to caption."""
+    if not excerpt_ids:
+        return ""
+    return f'<p class="none">Excerpts: {_escape(selection_label)}.</p>'
+
+
 def _render_evidence_column(record: EvidenceRecord, comments_by_id: dict[str, EligibleComment]) -> str:
     aligned_count = len(record.aligned_ids)
     countervailing_count = len(record.countervailing_ids)
@@ -314,19 +328,23 @@ def _render_evidence_column(record: EvidenceRecord, comments_by_id: dict[str, El
     blocks: list[str] = []
     if aligned_count:
         full_width = ' style="flex-basis:100%"' if not countervailing_count else ""
+        note = _excerpt_selection_note(record.aligned_excerpt_ids, record.aligned_excerpt_selection)
         blocks.append(
             f"<div{full_width}>\n"
             f'        <h4>Comments consistent with this result ({aligned_count})</h4>\n'
             f"        {_excerpt_blockquotes(record.aligned_excerpt_ids, comments_by_id, other=False)}\n"
-            "      </div>"
+            + (f"        {note}\n" if note else "")
+            + "      </div>"
         )
     if countervailing_count:
         full_width = ' style="flex-basis:100%"' if not aligned_count else ""
+        note = _excerpt_selection_note(record.countervailing_excerpt_ids, record.countervailing_excerpt_selection)
         blocks.append(
             f"<div{full_width}>\n"
             f'        <h4 class="other">Comments pointing the other way ({countervailing_count})</h4>\n'
             f"        {_excerpt_blockquotes(record.countervailing_excerpt_ids, comments_by_id, other=True)}\n"
-            "      </div>"
+            + (f"        {note}\n" if note else "")
+            + "      </div>"
         )
     if not blocks:
         blocks.append(
@@ -394,7 +412,7 @@ def _render_context_section(context: ScopeContext, exceptions: dict) -> str:
         "Findings that crossed the review thresholds this run, with the student comments that relate "
         f"to each. Figures come from {', '.join(present)}."
     )
-    items = _exception_details(exceptions)
+    items = _exception_summaries(exceptions)
     if items:
         items_html = "\n        ".join(f"<li>{_escape(item)}</li>" for item in items)
     else:
@@ -427,17 +445,19 @@ def render_brief_html(
     decision: str,
     comments_by_id: dict[str, EligibleComment],
     output_dir: Path,
-    mockup_path: Path = MOCKUP_PATH,
+    css_path: Path = config.BRIEF_CSS_PATH,
 ) -> Path:
     """Writes runs/<run_id>/brief.html from accepted_records only, styled
-    per docs/brief_mockup.html (read live from that file, not copy-pasted),
-    with every value, gauge position, excerpt, status and question filled
-    from the run's own data. At most MAX_HTML_EXCERPTS comments per side are
-    quoted, chosen at the findings review gate
+    per src/cpc_agent/templates/brief.css (design source: docs/brief_mockup.html,
+    kept there only as a human-readable preview — generation never reads
+    that docs/ file), with every value, gauge position, excerpt, status and
+    question filled from the run's own data. At most MAX_HTML_EXCERPTS
+    comments per side are quoted, chosen at the findings review gate
     (EvidenceRecord.aligned_excerpt_ids/countervailing_excerpt_ids);
     quarantined comments can never appear because comments_by_id only ever
-    contains eligible comments."""
-    style_block = _load_mockup_style(mockup_path)
+    contains eligible comments. No external resources (fonts, scripts) are
+    loaded, so the brief renders correctly offline."""
+    style_block = _load_brief_css(css_path)
     header_html = _render_header(context, analyst_name, decision, generated_date, snapshot_date)
     context_html = _render_context_section(context, exceptions)
     reading_html = (
@@ -463,8 +483,6 @@ def render_brief_html(
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>Course performance workshop brief — {_escape(context.course_code)}</title>\n"
-        '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
-        '<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;1,400&display=swap" rel="stylesheet">\n'
         f"{style_block}\n"
         "</head>\n"
         "<body>\n"

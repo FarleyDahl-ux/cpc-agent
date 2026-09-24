@@ -6,11 +6,18 @@ import pytest
 from cpc_agent import config
 from cpc_agent.loaders import load_approved_sources
 from cpc_agent.validation import (
+    BlankValueIssue,
     HaltError,
+    LowSampleIssue,
+    ReconciliationIssue,
+    blank_value_summary,
     check_satisfaction_sample_size,
     find_blank_required_values,
+    low_sample_excluded_summary,
+    low_sample_proceeded_summary,
     missing_optional_files,
     reconcile_status_counts,
+    reconciliation_summary,
     validate_schema,
 )
 
@@ -109,3 +116,55 @@ def test_check_satisfaction_sample_size_flags_below_threshold():
     issues = check_satisfaction_sample_size(rows)
     assert len(issues) == 1
     assert issues[0].n_respondents == 12
+
+
+# --- plain-language summaries --------------------------------------------
+
+
+def test_blank_value_summary_is_plain_language_not_technical():
+    issue = BlankValueIssue(
+        file="course_metrics.csv",
+        row_index=0,
+        field="withdrawals",
+        segment={"reporting_period": "2025", "delivery_region": "Region C", "delivery_mode": "Blended"},
+        issue_key="course_metrics.csv:2025:Region C:Blended:withdrawals",
+    )
+    summary = blank_value_summary(issue)
+    assert summary == "Region C blended delivery was excluded because the 2025 withdrawal figure was missing."
+    # No raw field/key=value technical syntax in the plain summary.
+    assert "delivery_region=" not in summary
+    assert "reporting_period=" not in summary
+
+
+def test_reconciliation_summary_is_plain_language():
+    issue = ReconciliationIssue(
+        file="course_metrics.csv",
+        row_index=0,
+        segment={"reporting_period": "2025", "delivery_region": "Region C", "delivery_mode": "Blended"},
+        enrolments=310,
+        sum_of_status_fields=300,
+        difference=-10,
+        issue_key="course_metrics.csv:2025:Region C:Blended:reconciliation",
+    )
+    summary = reconciliation_summary(issue)
+    assert "Region C blended delivery" in summary
+    assert "2025" in summary
+    assert "didn't add up" in summary
+    assert "delivery_region=" not in summary
+
+
+def test_low_sample_summaries_are_plain_language():
+    issue = LowSampleIssue(
+        file="satisfaction.csv",
+        row_index=0,
+        segment={"reporting_period": "2025", "delivery_mode": "Blended", "survey_item": "teacher_support"},
+        n_respondents=12,
+        issue_key="satisfaction.csv:2025:Blended:teacher_support:n_respondents",
+    )
+    excluded = low_sample_excluded_summary(issue)
+    proceeded = low_sample_proceeded_summary(issue)
+    assert "Blended teacher support results" in excluded
+    assert "excluded" in excluded
+    assert "Blended teacher support results" in proceeded
+    assert "included with caution" in proceeded
+    assert "survey_item=" not in excluded and "survey_item=" not in proceeded

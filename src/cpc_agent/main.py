@@ -22,14 +22,18 @@ from .gates import Gates
 from .investigate import run_investigation
 from .loaders import load_approved_sources
 from .metrics import calculate_metrics, flag_signals
-from .screening import screen_comments
+from .screening import quarantine_summary, screen_comments
 from .validation import (
     HaltError,
+    blank_value_summary,
     check_reporting_context,
     check_satisfaction_sample_size,
     find_blank_required_values,
+    low_sample_excluded_summary,
+    low_sample_proceeded_summary,
     missing_optional_files,
     reconcile_status_counts,
+    reconciliation_summary,
     segment_of,
     validate_schema,
 )
@@ -91,8 +95,13 @@ def run_pipeline(
     for key in missing_optional_files(sources):
         filename = config.OPTIONAL_FILES[key]
         detail = f"{filename} not available; continuing with quantitative findings only."
-        exceptions["limitations"].append({"file": filename, "detail": detail})
-        log.log_event("limitation", file=filename, detail=detail)
+        summary = (
+            "Learner comments weren't available for this run, so only the numeric results are included."
+            if key == "student_feedback"
+            else f"{filename} wasn't available for this run."
+        )
+        exceptions["limitations"].append({"file": filename, "detail": detail, "summary": summary})
+        log.log_event("limitation", file=filename, detail=detail, summary=summary)
 
     excluded: dict[str, set[tuple]] = {
         "course_metrics.csv": set(),
@@ -100,10 +109,10 @@ def run_pipeline(
         "unit_results.csv": set(),
     }
 
-    def _record_exclusion(issue_key: str, segment: dict[str, str], filename: str, reason: str) -> None:
+    def _record_exclusion(issue_key: str, segment: dict[str, str], filename: str, reason: str, summary: str) -> None:
         detail = f"Excluded {', '.join(f'{k}={v}' for k, v in segment.items())} from {filename} — {reason} (value never estimated)."
-        exceptions["exclusions"].append({"issue_key": issue_key, "detail": detail})
-        log.log_event("exclusion", issue_key=issue_key, detail=detail)
+        exceptions["exclusions"].append({"issue_key": issue_key, "detail": detail, "summary": summary})
+        log.log_event("exclusion", issue_key=issue_key, detail=detail, summary=summary)
 
     for issue in find_blank_required_values(sources):
         decision = gates.resolve_blank_value(issue)
@@ -114,7 +123,7 @@ def run_pipeline(
             print(f"HALT: analyst aborted on blank value for {issue.issue_key}")
             return 1
         excluded[issue.file].add(tuple(issue.segment.values()))
-        _record_exclusion(issue.issue_key, issue.segment, issue.file, f"blank '{issue.field}'")
+        _record_exclusion(issue.issue_key, issue.segment, issue.file, f"blank '{issue.field}'", blank_value_summary(issue))
 
     for issue in reconcile_status_counts(sources.get("course_metrics").rows):
         decision = gates.resolve_reconciliation(issue)
@@ -125,17 +134,21 @@ def run_pipeline(
             print(f"HALT: analyst aborted on reconciliation mismatch for {issue.issue_key}")
             return 1
         excluded["course_metrics.csv"].add(tuple(issue.segment.values()))
-        _record_exclusion(issue.issue_key, issue.segment, "course_metrics.csv", "failed reconciliation")
+        _record_exclusion(issue.issue_key, issue.segment, "course_metrics.csv", "failed reconciliation", reconciliation_summary(issue))
 
     for issue in check_satisfaction_sample_size(sources.get("satisfaction").rows):
         decision = gates.resolve_low_sample(issue)
         if decision == "exclude":
             excluded["satisfaction.csv"].add(tuple(issue.segment.values()))
-            _record_exclusion(issue.issue_key, issue.segment, "satisfaction.csv", "n_respondents below minimum sample size")
+            _record_exclusion(
+                issue.issue_key, issue.segment, "satisfaction.csv", "n_respondents below minimum sample size",
+                low_sample_excluded_summary(issue),
+            )
         else:
             detail = f"Proceeded with {issue.segment} despite n_respondents={issue.n_respondents:.0f} below minimum sample size."
-            exceptions["limitations"].append({"issue_key": issue.issue_key, "detail": detail})
-            log.log_event("low_sample_proceeded", issue_key=issue.issue_key, detail=detail)
+            summary = low_sample_proceeded_summary(issue)
+            exceptions["limitations"].append({"issue_key": issue.issue_key, "detail": detail, "summary": summary})
+            log.log_event("low_sample_proceeded", issue_key=issue.issue_key, detail=detail, summary=summary)
 
     course_metrics_rows = _filter_excluded(sources.get("course_metrics").rows, "course_metrics.csv", excluded["course_metrics.csv"])
     satisfaction_rows = _filter_excluded(sources.get("satisfaction").rows, "satisfaction.csv", excluded["satisfaction.csv"])
@@ -152,8 +165,11 @@ def run_pipeline(
     screening_result = screen_comments(feedback_rows)
     for quarantined in screening_result.quarantined:
         detail = f"Quarantined comment {quarantined.comment_id}: {quarantined.reason}."
-        exceptions["quarantined"].append({"comment_id": quarantined.comment_id, "reason": quarantined.reason, "detail": detail})
-        log.log_event("quarantine", comment_id=quarantined.comment_id, reason=quarantined.reason)
+        summary = quarantine_summary(quarantined.reasons)
+        exceptions["quarantined"].append(
+            {"comment_id": quarantined.comment_id, "reason": quarantined.reason, "detail": detail, "summary": summary}
+        )
+        log.log_event("quarantine", comment_id=quarantined.comment_id, reason=quarantined.reason, summary=summary)
 
     investigation = run_investigation(
         signals,
@@ -165,8 +181,9 @@ def run_pipeline(
     )
     if signals and screening_result.eligible and not investigation.finished:
         detail = "Investigation loop ended without an explicit finish_investigation call."
-        exceptions["limitations"].append({"detail": detail})
-        log.log_event("limitation", detail=detail)
+        summary = "The evidence-gathering step ended before every finding could be reviewed."
+        exceptions["limitations"].append({"detail": detail, "summary": summary})
+        log.log_event("limitation", detail=detail, summary=summary)
 
     evidence_records = []
     for signal in signals:

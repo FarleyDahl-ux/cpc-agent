@@ -7,10 +7,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+PACKAGE_DIR = Path(__file__).resolve().parent
+BASE_DIR = PACKAGE_DIR.parent.parent
 DATA_DIR = BASE_DIR / "data"
 RUNS_DIR = BASE_DIR / "runs"
 TEMPLATE_PATH = DATA_DIR / "cpc_brief_template.txt"
+TEMPLATES_DIR = PACKAGE_DIR / "templates"
+BRIEF_CSS_PATH = TEMPLATES_DIR / "brief.css"
 
 COURSE_CODE = "CWS30125"
 COURSE_TITLE = "Certificate III in Community Wellbeing Support"

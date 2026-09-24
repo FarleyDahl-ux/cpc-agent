@@ -347,13 +347,29 @@ def test_render_brief_html_writes_file_with_run_data(tmp_path):
     assert "Farley Dahl" in text
 
 
-def test_render_brief_html_uses_docs_mockup_style_verbatim(tmp_path):
+def test_render_brief_html_uses_packaged_css_verbatim(tmp_path):
     path = _render_html(tmp_path)
     text = path.read_text(encoding="utf-8")
-    mockup_text = config.BASE_DIR.joinpath("docs", "brief_mockup.html").read_text(encoding="utf-8")
-    style_start = mockup_text.index("<style>")
-    style_end = mockup_text.index("</style>") + len("</style>")
-    assert mockup_text[style_start:style_end] in text
+    css_text = config.BRIEF_CSS_PATH.read_text(encoding="utf-8")
+    assert f"<style>\n{css_text}</style>" in text
+
+
+def test_render_brief_html_does_not_depend_on_docs_directory(tmp_path):
+    # The default CSS source lives inside the installed package, not docs/.
+    assert config.BRIEF_CSS_PATH.is_relative_to(config.PACKAGE_DIR)
+    assert not config.BRIEF_CSS_PATH.is_relative_to(config.BASE_DIR / "docs")
+
+    mockup_path = config.BASE_DIR / "docs" / "brief_mockup.html"
+    moved_aside = mockup_path.with_suffix(".html.movedfortest")
+    mockup_path.rename(moved_aside)
+    try:
+        # render_brief_html still succeeds with docs/brief_mockup.html absent,
+        # using its default css_path (the packaged stylesheet).
+        path = _render_html(tmp_path)
+        assert path.exists()
+        assert "<style>" in path.read_text(encoding="utf-8")
+    finally:
+        moved_aside.rename(mockup_path)
 
 
 def test_render_brief_html_contains_only_accepted_records(tmp_path):
@@ -479,14 +495,94 @@ def test_render_brief_html_approve_vs_return_wording(tmp_path):
     assert "Approved for the workshop by" not in returned_text
 
 
-def test_render_brief_html_exceptions_appear_without_raw_comment_text(tmp_path):
+def test_render_brief_html_exceptions_show_plain_language_summary_not_technical_detail(tmp_path):
     exceptions = {
-        "exclusions": [{"issue_key": "x", "detail": "Excluded Region C from course_metrics.csv."}],
-        "quarantined": [{"comment_id": "FB016", "reason": "identifying_information", "detail": "Quarantined comment FB016: identifying_information."}],
+        "exclusions": [
+            {
+                "issue_key": "course_metrics.csv:2025:Region C:Blended:withdrawals",
+                "detail": "Excluded reporting_period=2025, delivery_region=Region C, delivery_mode=Blended from course_metrics.csv — blank 'withdrawals' (value never estimated).",
+                "summary": "Region C blended delivery was excluded because the 2025 withdrawal figure was missing.",
+            }
+        ],
+        "quarantined": [
+            {
+                "comment_id": "FB016",
+                "reason": "identifying_information",
+                "detail": "Quarantined comment FB016: identifying_information.",
+                "summary": "A comment was held back from review because it appeared to identify a person.",
+            }
+        ],
         "limitations": [],
     }
     path = _render_html(tmp_path, exceptions=exceptions)
     text = path.read_text(encoding="utf-8")
-    assert "Excluded Region C from course_metrics.csv." in text
-    assert "Quarantined comment FB016: identifying_information." in text
+    # Plain-language summaries are shown...
+    assert "Region C blended delivery was excluded because the 2025 withdrawal figure was missing." in text
+    assert "A comment was held back from review because it appeared to identify a person." in text
+    # ...but the technical detail string (field names, key=value pairs, comment IDs) is not —
+    # that stays in exception_log.json only.
+    assert "reporting_period=2025" not in text
+    assert "delivery_region=Region C" not in text
+    assert "FB016" not in text
     assert "Hughes" not in text
+
+
+def test_populate_cpc_template_shows_plain_language_summary_not_technical_detail(tmp_path):
+    exceptions = {
+        "exclusions": [
+            {
+                "issue_key": "x",
+                "detail": "Excluded reporting_period=2025, delivery_region=Region C, delivery_mode=Blended from course_metrics.csv — blank 'withdrawals' (value never estimated).",
+                "summary": "Region C blended delivery was excluded because the 2025 withdrawal figure was missing.",
+            }
+        ],
+        "quarantined": [],
+        "limitations": [],
+    }
+    path = populate_cpc_template(
+        accepted_records=[_accepted_record()],
+        context=_context(),
+        run_id="run-1",
+        data_version="abc123",
+        instruction_version="1.0.0",
+        generated_date="2026-09-24",
+        snapshot_date="2025-12-31",
+        exceptions=exceptions,
+        output_dir=tmp_path,
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "Region C blended delivery was excluded because the 2025 withdrawal figure was missing." in text
+    assert "reporting_region=Region C" not in text
+    assert "delivery_region=Region C" not in text
+
+
+def test_render_brief_html_has_no_external_resources(tmp_path):
+    path = _render_html(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    assert "googleapis" not in text
+    assert "fonts.google" not in text
+    assert "<link" not in text
+    assert "http://" not in text
+    assert "https://" not in text
+    # Only system font stacks, never the removed webfont family names.
+    assert "Public Sans" not in text
+    assert "Source Serif 4" not in text
+    assert "Segoe UI" in text
+    assert "Georgia" in text
+
+
+def test_render_brief_html_shows_automatic_excerpt_selection_label(tmp_path):
+    record = _accepted_record()  # excerpt fields default to automatic selection
+    path = _render_html(tmp_path, accepted=[record])
+    text = path.read_text(encoding="utf-8")
+    assert "Excerpts: automatic selection (first two by ID)." in text
+
+
+def test_render_brief_html_shows_analyst_excerpt_selection_label(tmp_path):
+    record = _accepted_record()
+    record.aligned_excerpt_selection = "analyst selection"
+    path = _render_html(tmp_path, accepted=[record])
+    text = path.read_text(encoding="utf-8")
+    assert "Excerpts: analyst selection." in text
+    # The countervailing side wasn't touched by the analyst in this record's fixture default.
+    assert "Excerpts: automatic selection (first two by ID)." in text

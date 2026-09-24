@@ -343,3 +343,73 @@ chosen and recorded here.
   anyway (not dozens). Documented here as a known limitation rather than
   engineered around, since doing so would need real pagination logic that
   nothing in this brief asked for.
+
+## Brief tidy-ups: plain-language exceptions, excerpt provenance, offline CSS
+
+- **Every exception entry now carries both `detail` (technical, unchanged)
+  and `summary` (plain language, new) in `exception_log.json`.** Nothing
+  was removed from the JSON — `exception_log.json` stays the full
+  technical record CLAUDE.md §7 specifies. Only the *brief's* rendering
+  (`brief._exception_summaries`, used by both `.md` and `.html`) switched
+  from `detail` to `summary`, so a human reading the brief sees "Region C
+  blended delivery was excluded because the 2025 withdrawal figure was
+  missing" instead of `Excluded reporting_period=2025,
+  delivery_region=Region C, delivery_mode=Blended from course_metrics.csv
+  — blank 'withdrawals' ...`.
+- **Plain-language phrasing lives next to the domain objects that produce
+  it, not in a new module**: `blank_value_summary`/`reconciliation_summary`/
+  `low_sample_excluded_summary`/`low_sample_proceeded_summary` in
+  `validation.py` (next to `BlankValueIssue`/`ReconciliationIssue`/
+  `LowSampleIssue`), `quarantine_summary` in `screening.py` (next to
+  `QuarantinedComment`). This mirrors the existing pattern of
+  `readable_measure_label`/`humanize_measure` living in `evidence.py` next
+  to `EvidenceRecord` — each module owns the human-facing wording for its
+  own data, rather than centralising presentation logic in `main.py` or a
+  new file.
+- **`_segment_phrase` (validation.py) infers a segment's plain-language
+  shape from which keys are present** (delivery_region+delivery_mode ->
+  "Region C blended delivery"; delivery_mode+survey_item -> "Online
+  teacher support results"; unit_code -> "CWSU204"), rather than one
+  phrase-builder per file type. This keeps the phrasing generic enough to
+  cover course_metrics.csv, satisfaction.csv and unit_results.csv issues
+  without three near-duplicate functions.
+- **Excerpt provenance is tracked per side, not per record.** An analyst
+  can pick aligned comments explicitly while leaving countervailing to the
+  default (or vice versa) in the same review turn, so
+  `EvidenceRecord.aligned_excerpt_selection`/`countervailing_excerpt_selection`
+  are independent fields, both defaulting to
+  `evidence.AUTOMATIC_EXCERPT_SELECTION` ("automatic selection (first two
+  by ID)"). `gates._resolve_excerpts` now returns `(ids, was_automatic)`
+  instead of just `ids`; `was_automatic` is `True` only when the analyst's
+  input was literally absent (`None` in scripted mode, a blank prompt
+  answer interactively) — an explicit choice that happens to resolve to
+  the same two IDs, or to nothing at all after filtering out invalid IDs,
+  is still recorded as "analyst selection", because a real choice was
+  made even if it didn't change the outcome.
+- **The selection label is shown in `brief.html` as a small caption under
+  each shown excerpt block** (`brief._excerpt_selection_note`), not in
+  `brief.md`, which never shows excerpt quotes at all (only ID lists) —
+  there is nothing for the label to caption there. It is always present in
+  `evidence_records.json` and the `findings_review` audit log event
+  either way, which is where CLAUDE.md's traceability requirement actually
+  bites.
+- **`src/cpc_agent/templates/brief.css` is the CSS `render_brief_html`
+  actually reads** (`config.BRIEF_CSS_PATH`, resolved from the package's
+  own directory via `Path(__file__)`, not `BASE_DIR`, so it keeps working
+  the same way whether the package is used from an editable install or
+  copied elsewhere). `docs/brief_mockup.html` remains in the repo as a
+  human-readable design preview (and `docs/brief_mockup.pdf` as a rendered
+  reference), but generation no longer reads either file — confirmed with
+  a test that moves `docs/brief_mockup.html` aside and regenerates a brief
+  successfully. Future design changes should be made in `brief.css`
+  directly; the mockup is a snapshot, not a live source, from this point on.
+- **Google Fonts (`Public Sans`, `Source Serif 4`) were dropped from the
+  font stacks, not just the `<link>` tags.** Leaving the family names in
+  `font: ... "Public Sans", "Segoe UI", ...` would have been harmless
+  online (the browser would just fall back to `Segoe UI` when the
+  webfont isn't loaded) but pointless to keep once nothing loads them —
+  removed them so the stack says what it actually uses: `"Segoe UI",
+  "Helvetica Neue", Arial, sans-serif` for the sans body text and
+  `Georgia, "Times New Roman", serif` for the serif quote/reading-note
+  text (previously `Georgia, serif`; added the extra Windows fallback
+  since `Segoe UI`'s serif counterpart isn't universal either).

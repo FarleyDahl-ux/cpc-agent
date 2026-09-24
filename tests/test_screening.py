@@ -3,6 +3,7 @@ from cpc_agent.loaders import load_approved_sources
 from cpc_agent.screening import (
     IDENTIFYING_INFORMATION,
     POSSIBLE_INJECTION,
+    quarantine_summary,
     screen_comments,
 )
 
@@ -49,3 +50,29 @@ def test_no_false_positive_quarantines_on_clean_comments():
     # FB024 mentions withdrawing/pausing but names no one and has no injection phrasing.
     assert "FB024" not in quarantined_ids
     assert "FB005" not in quarantined_ids
+
+
+def test_quarantine_summary_is_plain_language_not_a_reason_code():
+    identifying = quarantine_summary([IDENTIFYING_INFORMATION])
+    injection = quarantine_summary([POSSIBLE_INJECTION])
+    assert identifying != IDENTIFYING_INFORMATION
+    assert "identify a person" in identifying
+    assert injection != POSSIBLE_INJECTION
+    assert "genuine feedback" in injection
+    assert identifying != injection
+
+
+def test_quarantine_summary_never_includes_comment_id_or_text():
+    for quarantined in screen_comments(_rows()).quarantined:
+        summary = quarantine_summary(quarantined.reasons)
+        assert quarantined.comment_id not in summary
+        assert "Hughes" not in summary
+        assert "Ignore all previous instructions" not in summary
+
+
+def test_quarantine_summary_combines_distinct_reasons_without_duplication():
+    both = quarantine_summary([IDENTIFYING_INFORMATION, POSSIBLE_INJECTION])
+    assert "identify a person" in both
+    assert "genuine feedback" in both
+    repeated = quarantine_summary([IDENTIFYING_INFORMATION, IDENTIFYING_INFORMATION])
+    assert repeated == quarantine_summary([IDENTIFYING_INFORMATION])
