@@ -183,3 +183,30 @@ chosen and recorded here.
   `docs/test_results.md` rather than treated as a test failure, since
   CLAUDE.md's architecture deliberately keeps calculation/flagging/status
   deterministic while leaving comment interpretation to the model.
+
+## Post-phase-6 hardening — regex-bypass stress tests, prompt tightening, live comparison
+
+- **The two regex-bypass integration tests copy `data/` into a pytest
+  `tmp_path` and append rows there**, never touching the real `data/`
+  directory (which CLAUDE.md marks read-only, agent input only). Extra
+  comment IDs `FB901`/`FB902` are deliberately picked to be checked against
+  quarantine expectations (`assert "FB901" not in quarantined_ids`) without
+  colliding with any real `FB0xx` ID.
+- **Audit log is the one place a leak could realistically surface.**
+  `EvidenceRecord` never stores per-comment rationale text (only IDs,
+  themes and a generic `limitation` string — see phase 3 decision), so the
+  only output that could carry a model-authored sentence quoting or
+  paraphrasing a comment is `audit_log.jsonl`'s logged `record_link`/
+  `note_no_evidence` tool-call arguments (`rationale`/`reason`). Both new
+  tests check that file specifically for this reason, not just the brief.
+- **The countervailing test in the system prompt was tightened, not
+  loosened further via code.** A regex or code-level check can't judge
+  whether a comment "directly contradicts" a specific measure — that's
+  exactly the kind of judgement CLAUDE.md reserves for the LLM stage. The
+  fix is a stricter instruction, verified empirically (5-run live
+  comparison, `docs/test_results.md`), not a new deterministic filter.
+- **`scripts/live_comparison.py` lives outside `src/cpc_agent/`.** It's a
+  manual diagnostic for gauging live-model variance against the answer key,
+  not part of the shipped pipeline (CLAUDE.md's `src/cpc_agent/` structure
+  in §3 has no slot for it, and it must never run as part of `pytest`,
+  since it spends real API credits on every invocation).
