@@ -395,9 +395,14 @@ chosen and recorded here.
   bites.
 - **`src/cpc_agent/templates/brief.css` is the CSS `render_brief_html`
   actually reads** (`config.BRIEF_CSS_PATH`, resolved from the package's
-  own directory via `Path(__file__)`, not `BASE_DIR`, so it keeps working
-  the same way whether the package is used from an editable install or
-  copied elsewhere). `docs/brief_mockup.html` remains in the repo as a
+  own directory via `Path(__file__)`, not `BASE_DIR`). A plain
+  `packages.find` setuptools config does not bundle non-`.py` files into
+  a built wheel by default, so `pyproject.toml` also declares
+  `[tool.setuptools.package-data] cpc_agent = ["templates/*.css"]` —
+  verified by building a real (non-editable) `pip install .` into a
+  scratch venv and confirming `config.BRIEF_CSS_PATH` resolves and reads
+  correctly there, not just under the editable install this repo's own
+  README documents. `docs/brief_mockup.html` remains in the repo as a
   human-readable design preview (and `docs/brief_mockup.pdf` as a rendered
   reference), but generation no longer reads either file — confirmed with
   a test that moves `docs/brief_mockup.html` aside and regenerates a brief

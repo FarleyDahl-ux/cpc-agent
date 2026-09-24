@@ -11,6 +11,9 @@ requires-python = ">=3.11"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+cpc_agent = ["templates/*.css"]
+
 [tool.pytest.ini_options]
 markers = ["integration: calls the real OpenAI API (requires .env); skipped by default"]
 addopts = "-m 'not integration'"
