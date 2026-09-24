@@ -418,3 +418,114 @@ chosen and recorded here.
   `Georgia, "Times New Roman", serif` for the serif quote/reading-note
   text (previously `Georgia, serif`; added the extra Windows fallback
   since `Segoe UI`'s serif counterpart isn't universal either).
+
+## Genuinely iterative investigation: search budget, plan gating, limitations
+
+- **`search_comments` gained required `signal_id`/`direction`/`reason`
+  parameters, changing its shape from a generic corpus search to a
+  per-signal, per-direction one.** The brief's "3 searches per evidence
+  direction per signal" budget is only checkable at all if a search call
+  declares which signal and direction it's for — without that, there is
+  no way to know what to count against the cap, or to build a meaningful
+  `finish_investigation` gate ("every signal searched in both
+  directions"). This is a real behavioural change for the model (it must
+  now decide, before searching, which direction it's investigating,
+  rather than searching generically and sorting results afterwards) but
+  it's what makes every other requirement in this round checkable in
+  code rather than merely requested in prose.
+- **Only successful searches consume the budget; rejected/errored calls
+  (missing filter, over budget, duplicate) do not.** A call that never
+  actually searched anything shouldn't count against a budget that exists
+  to limit real search volume. The per-direction and global counters, and
+  the `search_seen` dedup set, are only updated at the very end of
+  `InvestigationTools.search_comments`, after every validation has passed.
+- **A limitation is recorded only when a search is actually rejected for
+  being over budget** (`_record_limitation` inside the per-direction and
+  global budget checks), not merely when a direction happens to end at
+  exactly 3 searches. A model that finds what it needs in 2 searches and
+  moves on hasn't "exhausted" anything — recording a limitation there
+  would misrepresent a successful, efficient search as a gap. The
+  distinction is real: rejection means the model *wanted* to keep
+  searching and couldn't; stopping voluntarily at or under the cap means
+  it didn't need to.
+- **`finish_investigation` returns `{"status": "not_finished",
+  "unmet_requirements": [...]}` instead of raising `ToolError` when
+  requirements aren't met.** This isn't a malformed or invalid call — it's
+  a legitimate response the model is expected to read and act on, so it
+  goes through the normal success path (no `error` key, still gets
+  captured by `_sanitize_result_for_log` like any other result) rather
+  than the error path. The loop's stop condition changed from `name ==
+  "finish_investigation" and error is None` to checking `tools.finished`
+  directly, since a "successful" (non-error) call can now still leave
+  `finished` false.
+- **The global run-wide budget (24) excuses the per-signal "both
+  directions searched" requirement, but a per-signal-direction budget
+  cap does not excuse the *other* direction.** `unmet_requirements()`
+  returns `[]` immediately once `total_searches >= 24`, because nothing
+  further can be searched no matter what — but exhausting the aligned
+  budget for one signal says nothing about whether its countervailing
+  direction has been searched, so that's still required (or excused only
+  by the same global check). `finalize_limitations()` (called once, after
+  the loop truly ends, regardless of why) is the backstop that guarantees
+  every signal missing a direction's search — including ones excused only
+  by the global-budget bypass, which never individually triggered a
+  per-search rejection — ends up with an explicit recorded limitation
+  before `evidence_records.json`/`exception_log.json` are built. Verified
+  directly (`test_finalize_limitations_records_gap_for_unsearched_direction`)
+  and indirectly through the no-eligible-comments early-return path,
+  which also calls it.
+- **The "recorded limitation" bypass in `unmet_requirements()` doesn't
+  check per-signal limitations, only the global budget.** A per-direction
+  budget rejection can only happen after 3 successful searches in that
+  direction already exist, so it can never be the reason a direction has
+  zero searches — the only way a signal-direction pair can be *unmet*
+  with zero searches is if the run ends (global budget or the tool-call
+  ceiling) before it's reached. Checking per-signal limitations in
+  `unmet_requirements()` in addition to the global check would therefore
+  be dead code; left out for that reason, not overlooked.
+- **`config.MAX_TOOL_CALLS` raised from 25 to 60.** The search budget
+  alone (24) was already nearly equal to the old ceiling; once
+  `get_comment_corpus_profile`, `list_signals`, `record_link`/
+  `note_no_evidence` per signal, and at least one (often two, given the
+  new gate) `finish_investigation` call are added on top, 25 would make
+  the *tool-call ceiling* the binding constraint almost every run,
+  independent of whether the model was actually within its search budget
+  — defeating the point of having a distinct, meaningful search budget.
+  60 gives comfortable headroom (confirmed against real runs, which used
+  18–24 searches plus roughly 10–15 other calls) without being large
+  enough to mask a genuinely runaway loop.
+- **Tool results are logged sanitised via a single function
+  (`_sanitize_result_for_log`), applied uniformly to every tool, not just
+  `search_comments`.** `list_signals`' result is reduced to IDs+count for
+  the same reason `search_comments`' is (its dicts don't carry comment
+  text, but reducing it too keeps the logging policy uniform and cheap to
+  audit: "every list-of-things result becomes IDs+count" is a simpler
+  invariant to verify than "every tool except these two is logged as-is").
+  `get_comment_corpus_profile`, `record_link`, `note_no_evidence`,
+  `ask_analyst` and `finish_investigation` results are already free of
+  comment text by construction and are logged unchanged.
+- **The structured `investigation_plan` event is logged once, at the end
+  of `run_investigation`, not incrementally per signal or per tool call.**
+  CLAUDE.md's brief for this round asked to "store a structured
+  investigation plan event" (singular), and a single end-of-run summary
+  (`InvestigationTools.build_plan()`) is both simpler to log/consume than
+  a stream of partial updates and gives a complete picture — per-signal
+  search coverage, links, no-evidence reasons and limitations — that
+  partial events logged mid-run couldn't (the model can still revise a
+  signal's links right up until `finish_investigation` succeeds). Routed
+  through a new `audit_log_event_fn` callback (main.py wires it to
+  `log.log_event`) rather than overloading `audit_log_tool_call_fn`,
+  since it isn't a tool call.
+- **A real 5-run live comparison after this change showed a genuine drop
+  in evidence-recall consistency (documented in full in
+  `docs/test_results.md`), traced to two causes: keyword-based search
+  under a tight budget sometimes not surfacing a comment within 3 tries,
+  and a defensible reclassification of FB024 (S4) as countervailing
+  rather than aligned under the previous round's own tightened
+  countervailing rule.** Neither is a code defect — the budget numbers
+  (3/24/5) are exactly what the brief specified, not a judgement call
+  available to loosen for better-looking recall, and the classification
+  disagreement is a legitimate reading of an already-ambiguous comment
+  that `answer_key.md`'s own commentary flags as boundary. Recorded
+  transparently rather than adjusted away, per the brief's explicit
+  instruction not to edit the answer key to match results.

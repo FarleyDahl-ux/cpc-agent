@@ -54,31 +54,43 @@ class _FakeResponse:
         self.choices = [_FakeChoice(message)]
 
 
+_DEFAULT_SCRIPT = [
+    ("get_comment_corpus_profile", {}),
+    ("list_signals", {}),
+    ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "looking for support complaints", "keyword": "reply"}),
+    ("search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "looking for support praise", "keyword": "detailed"}),
+    *[
+        ("record_link", {"signal_id": "S1", "comment_id": cid, "relation": "aligned", "theme": "Teacher responsiveness and support", "rationale": "reports a support gap"})
+        for cid in ("FB003", "FB007", "FB011", "FB015")
+    ],
+    *[
+        ("record_link", {"signal_id": "S1", "comment_id": cid, "relation": "countervailing", "theme": "Teacher responsiveness and support", "rationale": "reports responsive teaching"})
+        for cid in ("FB005", "FB019")
+    ],
+    ("search_comments", {"signal_id": "S2", "direction": "aligned", "reason": "looking for clarity complaints", "keyword": "assessment"}),
+    ("search_comments", {"signal_id": "S2", "direction": "countervailing", "reason": "looking for clarity praise", "keyword": "checklist"}),
+    *[
+        ("record_link", {"signal_id": "S2", "comment_id": cid, "relation": "aligned", "theme": "Assessment clarity", "rationale": "reports unclear assessment wording"})
+        for cid in ("FB002", "FB009", "FB013")
+    ],
+    ("record_link", {"signal_id": "S2", "comment_id": "FB017", "relation": "countervailing", "theme": "Assessment clarity", "rationale": "reports clear checklists"}),
+    ("search_comments", {"signal_id": "S3", "direction": "aligned", "reason": "looking for unit-specific complaints", "keyword": "legal"}),
+    ("search_comments", {"signal_id": "S3", "direction": "countervailing", "reason": "looking for unit-specific praise", "keyword": "ethical"}),
+    ("note_no_evidence", {"signal_id": "S3", "reason": "No eligible comments could be linked to this unit."}),
+    ("search_comments", {"signal_id": "S4", "direction": "aligned", "reason": "looking for withdrawal-related comments", "keyword": "withdraw"}),
+    ("search_comments", {"signal_id": "S4", "direction": "countervailing", "reason": "looking for continuation comments", "keyword": "flexib"}),
+    ("record_link", {"signal_id": "S4", "comment_id": "FB024", "relation": "aligned", "theme": "Flexibility and course pacing", "rationale": "reports nearly withdrawing"}),
+    ("finish_investigation", {}),
+]
+
+
 class _FakeClient:
     """Plays back a fixed script of tool calls that reproduces
-    tests/fixtures/expected_results.json's aligned/countervailing links."""
+    tests/fixtures/expected_results.json's aligned/countervailing links
+    (or a caller-supplied script for a different scenario)."""
 
-    def __init__(self):
-        script = [
-            ("list_signals", {}),
-            ("search_comments", {"delivery_mode": "Online"}),
-            *[
-                ("record_link", {"signal_id": "S1", "comment_id": cid, "relation": "aligned", "theme": "Teacher responsiveness and support", "rationale": "reports a support gap"})
-                for cid in ("FB003", "FB007", "FB011", "FB015")
-            ],
-            *[
-                ("record_link", {"signal_id": "S1", "comment_id": cid, "relation": "countervailing", "theme": "Teacher responsiveness and support", "rationale": "reports responsive teaching"})
-                for cid in ("FB005", "FB019")
-            ],
-            *[
-                ("record_link", {"signal_id": "S2", "comment_id": cid, "relation": "aligned", "theme": "Assessment clarity", "rationale": "reports unclear assessment wording"})
-                for cid in ("FB002", "FB009", "FB013")
-            ],
-            ("record_link", {"signal_id": "S2", "comment_id": "FB017", "relation": "countervailing", "theme": "Assessment clarity", "rationale": "reports clear checklists"}),
-            ("note_no_evidence", {"signal_id": "S3", "reason": "No eligible comments could be linked to this unit."}),
-            ("record_link", {"signal_id": "S4", "comment_id": "FB024", "relation": "aligned", "theme": "Flexibility and course pacing", "rationale": "reports nearly withdrawing"}),
-            ("finish_investigation", {}),
-        ]
+    def __init__(self, script=None):
+        script = script if script is not None else _DEFAULT_SCRIPT
         self._messages = [
             _FakeMessage([_FakeToolCall(f"c{i}", name, json.dumps(args))]) for i, (name, args) in enumerate(script)
         ]
@@ -215,3 +227,62 @@ def test_end_to_end_run_never_estimates_region_c_withdrawals(tmp_path):
 
     exceptions = json.loads((run_dir / "exception_log.json").read_text(encoding="utf-8"))
     assert any("Region C" in e["detail"] and "course_metrics.csv" in e["detail"] for e in exceptions["exclusions"])
+
+
+def test_end_to_end_run_records_search_budget_exhaustion_as_a_limitation(tmp_path):
+    """S1's aligned direction is searched 4 times (one over the 3-search
+    budget); the 4th is rejected inside the tool loop, which must surface
+    as a recorded limitation — on S1's evidence record and in
+    exception_log.json — never as a silently weaker link."""
+    script = [
+        ("get_comment_corpus_profile", {}),
+        ("list_signals", {}),
+        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r1", "keyword": "reply"}),
+        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r2", "keyword": "help"}),
+        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r3", "keyword": "wait"}),
+        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r4 over budget", "keyword": "teacher"}),
+        ("search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "r5", "keyword": "detailed"}),
+        ("record_link", {"signal_id": "S1", "comment_id": "FB003", "relation": "aligned", "theme": "Teacher responsiveness and support", "rationale": "reports a support gap"}),
+        ("search_comments", {"signal_id": "S2", "direction": "aligned", "reason": "r", "keyword": "assessment"}),
+        ("search_comments", {"signal_id": "S2", "direction": "countervailing", "reason": "r", "keyword": "checklist"}),
+        ("note_no_evidence", {"signal_id": "S2", "reason": "nothing conclusive"}),
+        ("search_comments", {"signal_id": "S3", "direction": "aligned", "reason": "r", "keyword": "legal"}),
+        ("search_comments", {"signal_id": "S3", "direction": "countervailing", "reason": "r", "keyword": "ethical"}),
+        ("note_no_evidence", {"signal_id": "S3", "reason": "nothing conclusive"}),
+        ("search_comments", {"signal_id": "S4", "direction": "aligned", "reason": "r", "keyword": "withdraw"}),
+        ("search_comments", {"signal_id": "S4", "direction": "countervailing", "reason": "r", "keyword": "flexib"}),
+        ("note_no_evidence", {"signal_id": "S4", "reason": "nothing conclusive"}),
+        ("finish_investigation", {}),
+    ]
+    result = run_pipeline(
+        answers_path=str(DEMO_ANSWERS),
+        data_dir=config.DATA_DIR,
+        runs_dir=tmp_path,
+        client=_FakeClient(script),
+        model="fake-model",
+    )
+    assert result == 0
+    run_dir = next(tmp_path.iterdir())
+
+    evidence_records = json.loads((run_dir / "evidence_records.json").read_text(encoding="utf-8"))
+    by_id = {r["finding_id"]: r for r in evidence_records}
+    # The rejected 4th search never weakens the link that WAS found — FB003 is still aligned.
+    assert by_id["S1"]["aligned_ids"] == ["FB003"]
+    assert "budget" in by_id["S1"]["limitation"].lower()
+
+    exceptions = json.loads((run_dir / "exception_log.json").read_text(encoding="utf-8"))
+    limitation_summaries = " ".join(e["summary"] for e in exceptions["limitations"])
+    assert "S1" in limitation_summaries
+    assert "budget" in limitation_summaries.lower()
+
+    audit_lines = (run_dir / "audit_log.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    events = [json.loads(line) for line in audit_lines]
+    limitation_events = [e for e in events if e.get("event") == "investigation_limitation"]
+    assert any(e["signal_id"] == "S1" and "budget" in e["summary"].lower() for e in limitation_events)
+
+    plan_events = [e for e in events if e.get("event") == "investigation_plan"]
+    assert len(plan_events) == 1
+    plan = plan_events[0]
+    assert plan["total_searches"] >= 3  # the rejected 4th attempt is not counted as a successful search
+    s1_plan = next(s for s in plan["signals"] if s["signal_id"] == "S1")
+    assert s1_plan["searches"]["aligned"] == 3  # capped at the budget, not 4

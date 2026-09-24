@@ -176,6 +176,7 @@ def run_pipeline(
         screening_result.eligible,
         ask_analyst_fn=gates.ask_analyst,
         audit_log_tool_call_fn=log.log_tool_call,
+        audit_log_event_fn=lambda event, payload: log.log_event(event, **payload),
         client=client,
         model=model,
     )
@@ -185,13 +186,21 @@ def run_pipeline(
         exceptions["limitations"].append({"detail": detail, "summary": summary})
         log.log_event("limitation", detail=detail, summary=summary)
 
+    for signal_id, texts in investigation.limitations.items():
+        for text in texts:
+            summary = f"{signal_id}: {text}"
+            exceptions["limitations"].append({"signal_id": signal_id, "detail": summary, "summary": summary})
+            log.log_event("investigation_limitation", signal_id=signal_id, summary=summary)
+
     evidence_records = []
     for signal in signals:
+        extra_limitation = " ".join(investigation.limitations.get(signal.id, []))
         record = build_evidence_record(
             signal,
             aligned_ids=investigation.aligned_ids(signal.id),
             countervailing_ids=investigation.countervailing_ids(signal.id),
             themes=investigation.themes(signal.id),
+            extra_limitation=extra_limitation,
         )
         evidence_records.append(record)
         log.log_event("evidence_status", finding_id=signal.id, status=record.evidence_status)

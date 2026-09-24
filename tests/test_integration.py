@@ -9,7 +9,7 @@ import shutil
 import pytest
 
 from cpc_agent import config
-from cpc_agent.investigate import run_investigation
+from cpc_agent.investigate import MAX_SEARCHES_PER_RUN, run_investigation
 from cpc_agent.loaders import load_approved_sources
 from cpc_agent.main import run_pipeline
 from cpc_agent.metrics import calculate_metrics, flag_signals
@@ -32,19 +32,40 @@ def test_real_investigation_loop_completes_and_stays_within_bounds():
     screening = screen_comments(sources.get("student_feedback").rows)
 
     tool_calls = []
+    plan_events = []
     tools = run_investigation(
         signals,
         screening.eligible,
         ask_analyst_fn=lambda q: "Use only the recorded evidence; no further information is available.",
-        audit_log_tool_call_fn=lambda name, args: tool_calls.append((name, args)),
+        audit_log_tool_call_fn=lambda name, args, result: tool_calls.append((name, args, result)),
+        audit_log_event_fn=lambda event, payload: plan_events.append((event, payload)),
     )
 
     assert tools.finished is True
     assert len(tool_calls) <= config.MAX_TOOL_CALLS
 
+    # Every search's logged result is IDs/counts only, never comment text.
+    for name, _, result in tool_calls:
+        if name == "search_comments" and "error" not in result:
+            assert set(result) == {"result_ids", "count"}
+
+    # The genuinely-iterative requirement held: every signal was searched in
+    # both directions (or excused by an exhausted run-wide budget), and has
+    # either a recorded link or a no-evidence note.
     for signal in signals:
         has_links = tools.aligned_ids(signal.id) or tools.countervailing_ids(signal.id)
         assert has_links or signal.id in tools.no_evidence, f"{signal.id} has no link and no no-evidence note"
+
+    # Unless the run-wide search budget was exhausted, every signal was
+    # actually searched in both directions before finish was accepted.
+    if tools.total_searches < MAX_SEARCHES_PER_RUN:
+        for signal in signals:
+            assert tools.search_count(signal.id, "aligned") >= 1, signal.id
+            assert tools.search_count(signal.id, "countervailing") >= 1, signal.id
+
+    assert plan_events and plan_events[0][0] == "investigation_plan"
+    plan = plan_events[0][1]
+    assert plan["finished"] is True
 
     for signal_id in list(tools.aligned) + list(tools.countervailing):
         for link in {**tools.aligned[signal_id], **tools.countervailing[signal_id]}.values():

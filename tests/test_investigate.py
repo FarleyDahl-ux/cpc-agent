@@ -4,13 +4,16 @@ import pytest
 
 from cpc_agent import config
 from cpc_agent.investigate import (
+    MAX_SEARCHES_PER_DIRECTION,
+    MAX_SEARCHES_PER_RUN,
+    MAX_SEARCH_RESULTS,
     InvestigationTools,
     ToolError,
     run_investigation,
 )
 from cpc_agent.loaders import load_approved_sources
-from cpc_agent.metrics import calculate_metrics, flag_signals
-from cpc_agent.screening import screen_comments
+from cpc_agent.metrics import Signal, calculate_metrics, flag_signals
+from cpc_agent.screening import EligibleComment, screen_comments
 
 REGION_C_EXCLUDED = {("2025", "Region C", "Blended")}
 
@@ -28,6 +31,36 @@ def _signals_and_comments():
     return signals, screening.eligible
 
 
+def _one_signal() -> Signal:
+    return Signal(
+        id="S1",
+        kind="satisfaction",
+        measure="teacher_support",
+        segment="Online",
+        value=61.0,
+        n=380,
+        calculation="61% satisfied (n=380)",
+        comparison_rule="11 points below organisation average",
+        source_file="satisfaction.csv",
+        period="2025",
+        sort_key=-11.0,
+        details={},
+    )
+
+
+def _two_comments() -> list[EligibleComment]:
+    return [
+        EligibleComment(
+            comment_id="FB003", reporting_period="2025", delivery_region="Online", delivery_mode="Online",
+            prompt="Needs improvement", text="I waited a week for a reply to my question.",
+        ),
+        EligibleComment(
+            comment_id="FB005", reporting_period="2025", delivery_region="Online", delivery_mode="Online",
+            prompt="Best aspect", text="My teacher always replied the same day.",
+        ),
+    ]
+
+
 # --- InvestigationTools (deterministic, no API) --------------------------
 
 
@@ -38,24 +71,111 @@ def test_list_signals_reports_all_flagged_signals():
     assert {s["id"] for s in listed} == {"S1", "S2", "S3", "S4"}
 
 
-def test_search_comments_filters_by_mode_region_keyword():
+def test_get_comment_corpus_profile_returns_counts_only():
     signals, comments = _signals_and_comments()
     tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
-    online = tools.search_comments(delivery_mode="Online")
-    assert online and all(c["mode"] == "Online" for c in online)
-    region_a = tools.search_comments(delivery_region="Region A")
-    assert region_a and all(c["region"] == "Region A" for c in region_a)
-    keyword_hits = tools.search_comments(keyword="assessment")
-    assert keyword_hits and all("assessment" in c["text"].lower() for c in keyword_hits)
+    profile = tools.get_comment_corpus_profile()
+    assert profile["total_eligible_comments"] == len(comments)
+    assert set(profile["by_delivery_mode"]) <= {"Online", "Face to face", "Blended"}
+    assert sum(profile["by_delivery_mode"].values()) == len(comments)
+    assert sum(profile["by_delivery_region"].values()) == len(comments)
+    assert sum(profile["by_reporting_period"].values()) == len(comments)
+    # No comment text or IDs anywhere in the profile — counts only.
+    blob = json.dumps(profile)
+    assert "FB0" not in blob  # no comment_id-shaped strings
+    for c in comments:
+        assert c.text not in blob
+
+
+def test_search_comments_requires_signal_id_direction_and_reason():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    with pytest.raises(ToolError):
+        tools.search_comments(signal_id="S99", direction="aligned", reason="r", delivery_mode="Online")
+    with pytest.raises(ToolError):
+        tools.search_comments(signal_id="S1", direction="sideways", reason="r", delivery_mode="Online")
+    with pytest.raises(ToolError):
+        tools.search_comments(signal_id="S1", direction="aligned", reason="", delivery_mode="Online")
+
+
+def test_search_comments_rejects_unfiltered_call_pointing_to_profile_tool():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    with pytest.raises(ToolError) as excinfo:
+        tools.search_comments(signal_id="S1", direction="aligned", reason="looking for support complaints")
+    assert "get_comment_corpus_profile" in str(excinfo.value)
+
+
+def test_search_comments_returns_at_most_five_results():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    online = tools.search_comments(signal_id="S1", direction="aligned", reason="r", delivery_mode="Online")
+    assert len(online) <= MAX_SEARCH_RESULTS
 
 
 def test_search_comments_never_returns_quarantined_comments():
     signals, comments = _signals_and_comments()
     tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
-    all_results = tools.search_comments()
-    ids = {c["id"] for c in all_results}
+    results = tools.search_comments(signal_id="S1", direction="aligned", reason="r", delivery_mode="Online")
+    ids = {c["id"] for c in results}
     assert "FB016" not in ids
     assert "FB018" not in ids
+
+
+def test_search_comments_filters_by_mode_region_keyword():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    online = tools.search_comments(signal_id="S1", direction="aligned", reason="r", delivery_mode="Online")
+    assert online and all(c["mode"] == "Online" for c in online)
+    region_a = tools.search_comments(signal_id="S1", direction="aligned", reason="r2", delivery_region="Region A")
+    assert region_a and all(c["region"] == "Region A" for c in region_a)
+    keyword_hits = tools.search_comments(signal_id="S1", direction="countervailing", reason="r3", keyword="assessment")
+    assert keyword_hits and all("assessment" in c["text"].lower() for c in keyword_hits)
+
+
+def test_search_comments_enforces_per_direction_budget_and_records_limitation():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    for i, kw in enumerate(["assessment", "help", "reply"]):
+        tools.search_comments(signal_id="S1", direction="aligned", reason=f"attempt {i}", keyword=kw)
+    assert tools.search_count("S1", "aligned") == MAX_SEARCHES_PER_DIRECTION
+    assert "S1" not in tools.limitations  # not exhausted yet, just at the cap
+
+    with pytest.raises(ToolError):
+        tools.search_comments(signal_id="S1", direction="aligned", reason="one more", keyword="teacher")
+
+    assert any("budget" in text.lower() for text in tools.limitations["S1"])
+    # The other direction is untouched by the aligned-direction budget.
+    assert tools.search_count("S1", "countervailing") == 0
+
+
+def test_search_comments_enforces_global_budget_and_records_limitation():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    tools.total_searches = MAX_SEARCHES_PER_RUN  # simulate an exhausted run-wide budget
+
+    with pytest.raises(ToolError):
+        tools.search_comments(signal_id="S2", direction="aligned", reason="r", delivery_mode="Online")
+
+    assert any("run-wide" in text.lower() or "budget" in text.lower() for text in tools.limitations["S2"])
+
+
+def test_search_comments_rejects_identical_repeat():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    tools.search_comments(signal_id="S1", direction="aligned", reason="r", delivery_mode="Online")
+    with pytest.raises(ToolError):
+        tools.search_comments(signal_id="S1", direction="aligned", reason="different reason, same filters", delivery_mode="Online")
+
+
+def test_search_comments_allows_same_filters_across_different_directions():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    tools.search_comments(signal_id="S1", direction="aligned", reason="r", delivery_mode="Online")
+    # Same signal, same filter, different direction — not a duplicate.
+    tools.search_comments(signal_id="S1", direction="countervailing", reason="r2", delivery_mode="Online")
+    assert tools.search_count("S1", "aligned") == 1
+    assert tools.search_count("S1", "countervailing") == 1
 
 
 def test_record_link_rejects_unknown_signal_id():
@@ -102,6 +222,94 @@ def test_note_no_evidence_and_ask_analyst():
     answer = tools.ask_analyst("Is FB024 about withdrawal or just support?")
     assert answer == {"answer": "use judgement"}
     assert asked == ["Is FB024 about withdrawal or just support?"]
+
+
+# --- finish_investigation gating and limitations ---------------------------
+
+
+def _search_both_directions(tools, signal_id, keyword_prefix="k"):
+    tools.search_comments(signal_id=signal_id, direction="aligned", reason="r", keyword=f"{keyword_prefix}a")
+    tools.search_comments(signal_id=signal_id, direction="countervailing", reason="r", keyword=f"{keyword_prefix}b")
+
+
+def test_unmet_requirements_lists_signals_missing_direction_searches():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    unmet = tools.unmet_requirements()
+    assert len(unmet) == len(signals)  # nothing searched yet
+    assert all("S" in u for u in unmet)
+
+
+def test_unmet_requirements_empty_once_both_directions_searched_for_every_signal():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    for i, signal in enumerate(signals):
+        _search_both_directions(tools, signal.id, keyword_prefix=f"zz{i}")
+    assert tools.unmet_requirements() == []
+
+
+def test_unmet_requirements_empty_when_run_wide_budget_exhausted():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    tools.total_searches = MAX_SEARCHES_PER_RUN
+    # Nothing was actually searched, but nothing more CAN be done — excused.
+    assert tools.unmet_requirements() == []
+
+
+def test_finish_investigation_returns_not_finished_with_unmet_requirements():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    result = tools.finish_investigation()
+    assert result["status"] == "not_finished"
+    assert len(result["unmet_requirements"]) == len(signals)
+    assert tools.finished is False
+
+
+def test_finish_investigation_succeeds_once_requirements_met():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    for i, signal in enumerate(signals):
+        _search_both_directions(tools, signal.id, keyword_prefix=f"zz{i}")
+    result = tools.finish_investigation()
+    assert result == {"status": "finished"}
+    assert tools.finished is True
+
+
+def test_finalize_limitations_records_gap_for_unsearched_direction():
+    tools = InvestigationTools(signals=[_one_signal()], eligible_comments=_two_comments(), ask_analyst_fn=lambda q: "n/a")
+    tools.search_comments(signal_id="S1", direction="aligned", reason="r", keyword="waited")
+    # countervailing was never searched
+    tools.finalize_limitations()
+    assert any("countervailing" in text for text in tools.limitations["S1"])
+    assert "aligned" not in " ".join(tools.limitations.get("S1", []))  # aligned WAS searched, no gap there
+
+
+def test_finalize_limitations_does_not_duplicate_text():
+    tools = InvestigationTools(signals=[_one_signal()], eligible_comments=_two_comments(), ask_analyst_fn=lambda q: "n/a")
+    tools.finalize_limitations()
+    tools.finalize_limitations()
+    # Calling it twice must not double up the same limitation text.
+    assert len(tools.limitations["S1"]) == len(set(tools.limitations["S1"]))
+
+
+def test_build_plan_structure_and_no_comment_text_leak():
+    tools = InvestigationTools(signals=[_one_signal()], eligible_comments=_two_comments(), ask_analyst_fn=lambda q: "n/a")
+    tools.search_comments(signal_id="S1", direction="aligned", reason="looking for support complaints", keyword="waited")
+    tools.record_link("S1", "FB003", "aligned", "Teacher responsiveness and support", "reports a delayed reply")
+    tools.finalize_limitations()
+    plan = tools.build_plan()
+
+    assert plan["total_searches"] == 1
+    assert plan["signals"][0]["signal_id"] == "S1"
+    assert plan["signals"][0]["searches"] == {"aligned": 1, "countervailing": 0}
+    assert plan["signals"][0]["aligned_ids"] == ["FB003"]
+    assert len(plan["search_log"]) == 1
+    assert plan["search_log"][0]["result_ids"] == ["FB003"]
+    assert plan["search_log"][0]["reason"] == "looking for support complaints"
+
+    blob = json.dumps(plan)
+    for comment in _two_comments():
+        assert comment.text not in blob
 
 
 # --- run_investigation orchestration (mocked client) ----------------------
@@ -160,6 +368,10 @@ class _FakeClient:
         return _FakeResponse(message)
 
 
+def _call(call_id, name, args):
+    return _FakeToolCall(call_id, name, json.dumps(args))
+
+
 def test_run_investigation_with_no_signals_skips_the_api():
     tools = run_investigation(
         signals=[], eligible_comments=[], ask_analyst_fn=lambda q: "n/a", client="should-not-be-used"
@@ -169,57 +381,118 @@ def test_run_investigation_with_no_signals_skips_the_api():
 
 def test_run_investigation_with_no_eligible_comments_auto_notes_every_signal():
     signals, _ = _signals_and_comments()
+    plan_events = []
     tools = run_investigation(
-        signals=signals, eligible_comments=[], ask_analyst_fn=lambda q: "n/a", client="should-not-be-used"
+        signals=signals,
+        eligible_comments=[],
+        ask_analyst_fn=lambda q: "n/a",
+        audit_log_event_fn=lambda event, payload: plan_events.append((event, payload)),
+        client="should-not-be-used",
     )
     assert set(tools.no_evidence) == {s.id for s in signals}
+    # Even the auto-notified path records why each direction was never searched.
+    for signal in signals:
+        assert any("aligned" in t for t in tools.limitations[signal.id])
+        assert any("countervailing" in t for t in tools.limitations[signal.id])
+    assert plan_events and plan_events[0][0] == "investigation_plan"
 
 
 def test_run_investigation_drives_tool_loop_to_completion():
-    signals, comments = _signals_and_comments()
+    signal = _one_signal()
+    comments = _two_comments()
     fake_client = _FakeClient(
         [
-            _FakeMessage(tool_calls=[_FakeToolCall("c1", "list_signals", "{}")]),
+            _FakeMessage(tool_calls=[_call("c1", "get_comment_corpus_profile", {})]),
             _FakeMessage(
-                tool_calls=[_FakeToolCall("c2", "search_comments", json.dumps({"delivery_mode": "Online"}))]
+                tool_calls=[_call("c2", "search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "looking for complaints", "keyword": "waited"})]
+            ),
+            _FakeMessage(
+                tool_calls=[_call("c3", "search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "looking for praise", "keyword": "replied"})]
             ),
             _FakeMessage(
                 tool_calls=[
-                    _FakeToolCall(
-                        "c3",
+                    _call(
+                        "c4",
                         "record_link",
-                        json.dumps(
-                            {
-                                "signal_id": "S1",
-                                "comment_id": "FB003",
-                                "relation": "aligned",
-                                "theme": "Teacher responsiveness and support",
-                                "rationale": "reports a delayed reply",
-                            }
-                        ),
+                        {
+                            "signal_id": "S1",
+                            "comment_id": "FB003",
+                            "relation": "aligned",
+                            "theme": "Teacher responsiveness and support",
+                            "rationale": "reports a delayed reply",
+                        },
                     )
                 ]
             ),
-            _FakeMessage(tool_calls=[_FakeToolCall("c4", "finish_investigation", "{}")]),
+            _FakeMessage(tool_calls=[_call("c5", "finish_investigation", {})]),
         ]
     )
     logged_calls = []
+    plan_events = []
     tools = run_investigation(
-        signals=signals,
+        signals=[signal],
         eligible_comments=comments,
         ask_analyst_fn=lambda q: "n/a",
-        audit_log_tool_call_fn=lambda name, args: logged_calls.append((name, args)),
+        audit_log_tool_call_fn=lambda name, args, result: logged_calls.append((name, args, result)),
+        audit_log_event_fn=lambda event, payload: plan_events.append((event, payload)),
         client=fake_client,
         model="fake-model",
     )
     assert tools.finished is True
     assert tools.aligned_ids("S1") == ["FB003"]
-    assert fake_client.create_calls == 4
-    logged_names = [name for name, _ in logged_calls]
-    assert logged_names == ["list_signals", "search_comments", "record_link", "finish_investigation"]
+    assert fake_client.create_calls == 5
+    logged_names = [name for name, _, _ in logged_calls]
+    assert logged_names == ["get_comment_corpus_profile", "search_comments", "search_comments", "record_link", "finish_investigation"]
+
     # Tool-call args must never carry raw comment text.
-    for _, args in logged_calls:
+    for _, args, _ in logged_calls:
         assert "text" not in args
+
+    # search_comments results are logged as IDs and a count only, never text.
+    search_results = [result for name, _, result in logged_calls if name == "search_comments"]
+    assert search_results[0] == {"result_ids": ["FB003"], "count": 1}
+    assert search_results[1] == {"result_ids": ["FB005"], "count": 1}
+    for _, _, result in logged_calls:
+        blob = json.dumps(result)
+        for comment in comments:
+            assert comment.text not in blob
+
+    assert plan_events and plan_events[0][0] == "investigation_plan"
+    assert plan_events[0][1]["finished"] is True
+
+
+def test_run_investigation_finish_rejected_then_accepted_after_more_searches():
+    signal = _one_signal()
+    comments = _two_comments()
+    fake_client = _FakeClient(
+        [
+            # First attempt: nothing searched yet — must be rejected.
+            _FakeMessage(tool_calls=[_call("c1", "finish_investigation", {})]),
+            _FakeMessage(
+                tool_calls=[_call("c2", "search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r", "keyword": "waited"})]
+            ),
+            _FakeMessage(
+                tool_calls=[_call("c3", "search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "r", "keyword": "replied"})]
+            ),
+            _FakeMessage(tool_calls=[_call("c4", "note_no_evidence", {"signal_id": "S1", "reason": "nothing clearly on point"})]),
+            # Second attempt: now it should succeed.
+            _FakeMessage(tool_calls=[_call("c5", "finish_investigation", {})]),
+        ]
+    )
+    logged_calls = []
+    tools = run_investigation(
+        signals=[signal],
+        eligible_comments=comments,
+        ask_analyst_fn=lambda q: "n/a",
+        audit_log_tool_call_fn=lambda name, args, result: logged_calls.append((name, args, result)),
+        client=fake_client,
+        model="fake-model",
+    )
+    assert tools.finished is True
+    finish_results = [result for name, _, result in logged_calls if name == "finish_investigation"]
+    assert finish_results[0]["status"] == "not_finished"
+    assert finish_results[0]["unmet_requirements"]
+    assert finish_results[1] == {"status": "finished"}
 
 
 def test_run_investigation_reports_tool_error_without_raising():
@@ -228,52 +501,60 @@ def test_run_investigation_reports_tool_error_without_raising():
         [
             _FakeMessage(
                 tool_calls=[
-                    _FakeToolCall(
+                    _call(
                         "c1",
                         "record_link",
-                        json.dumps(
-                            {
-                                "signal_id": "S1",
-                                "comment_id": "FB016",  # quarantined
-                                "relation": "aligned",
-                                "theme": "Teacher responsiveness and support",
-                                "rationale": "x",
-                            }
-                        ),
+                        {
+                            "signal_id": "S1",
+                            "comment_id": "FB016",  # quarantined
+                            "relation": "aligned",
+                            "theme": "Teacher responsiveness and support",
+                            "rationale": "x",
+                        },
                     )
                 ]
             ),
-            _FakeMessage(tool_calls=[_FakeToolCall("c2", "finish_investigation", "{}")]),
+            _FakeMessage(tool_calls=[_call("c2", "finish_investigation", {})]),
         ]
     )
     tools = run_investigation(
-        signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a", client=fake_client, model="fake-model"
+        signals=signals,
+        eligible_comments=comments,
+        ask_analyst_fn=lambda q: "n/a",
+        client=fake_client,
+        model="fake-model",
+        max_tool_calls=2,
     )
     assert tools.aligned_ids("S1") == []
-    assert tools.finished is True
+    assert fake_client.create_calls == 2
 
 
 def test_run_investigation_rejects_unknown_tool_name_without_raising():
     signals, comments = _signals_and_comments()
     fake_client = _FakeClient(
         [
-            _FakeMessage(tool_calls=[_FakeToolCall("c1", "delete_all_data", "{}")]),
-            _FakeMessage(tool_calls=[_FakeToolCall("c2", "finish_investigation", "{}")]),
+            _FakeMessage(tool_calls=[_call("c1", "delete_all_data", {})]),
+            _FakeMessage(tool_calls=[_call("c2", "finish_investigation", {})]),
         ]
     )
     tools = run_investigation(
-        signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a", client=fake_client, model="fake-model"
+        signals=signals,
+        eligible_comments=comments,
+        ask_analyst_fn=lambda q: "n/a",
+        client=fake_client,
+        model="fake-model",
+        max_tool_calls=2,
     )
-    assert tools.finished is True  # loop survives the malformed/unknown call
+    assert fake_client.create_calls == 2  # loop survives the malformed/unknown call
 
 
 def test_run_investigation_stops_at_max_tool_calls():
     signals, comments = _signals_and_comments()
     fake_client = _FakeClient(
         [
-            _FakeMessage(tool_calls=[_FakeToolCall("c1", "list_signals", "{}")]),
-            _FakeMessage(tool_calls=[_FakeToolCall("c2", "search_comments", "{}")]),
-            _FakeMessage(tool_calls=[_FakeToolCall("c3", "record_link", "{}")]),  # would raise if ever reached
+            _FakeMessage(tool_calls=[_call("c1", "list_signals", {})]),
+            _FakeMessage(tool_calls=[_call("c2", "search_comments", {})]),
+            _FakeMessage(tool_calls=[_call("c3", "record_link", {})]),  # would raise if ever reached
         ]
     )
     tools = run_investigation(

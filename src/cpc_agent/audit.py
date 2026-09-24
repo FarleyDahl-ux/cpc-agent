@@ -51,8 +51,10 @@ class AuditLog:
         self._fh.write(json.dumps(record, default=str) + "\n")
         self._fh.flush()
 
-    def log_tool_call(self, name: str, args: dict) -> None:
-        self.log_event("tool_call", tool=name, args=args)
+    def log_tool_call(self, name: str, args: dict, result: object = None) -> None:
+        """`result` must already be sanitised by the caller (IDs/counts
+        only, never comment text) — see investigate._sanitize_result_for_log."""
+        self.log_event("tool_call", tool=name, args=args, result=result)
 
     def close(self) -> None:
         self._fh.close()

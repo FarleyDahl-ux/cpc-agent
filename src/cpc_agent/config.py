@@ -132,5 +132,11 @@ THEMES = [
 ]
 
 # --- Investigation loop --------------------------------------------------
-
-MAX_TOOL_CALLS = 25
+#
+# MAX_TOOL_CALLS must comfortably exceed the search budget alone
+# (investigate.MAX_SEARCHES_PER_RUN = 24) plus the profile/list/record_link/
+# note_no_evidence/finish calls a real run also needs, or the outer
+# tool-call ceiling would bind before the search budget ever could —
+# making the search budget meaningless as a distinct constraint. See
+# docs/decisions.md.
+MAX_TOOL_CALLS = 60
