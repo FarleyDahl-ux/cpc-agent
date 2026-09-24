@@ -104,7 +104,7 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     run_dirs = list(tmp_path.iterdir())
     assert len(run_dirs) == 1
     run_dir = run_dirs[0]
-    for filename in ("evidence_records.json", "exception_log.json", "audit_log.jsonl", "brief.md"):
+    for filename in ("evidence_records.json", "exception_log.json", "audit_log.jsonl", "brief.md", "brief.html"):
         assert (run_dir / filename).exists(), filename
 
     evidence_records = json.loads((run_dir / "evidence_records.json").read_text(encoding="utf-8"))
@@ -155,6 +155,20 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     # Readable measure labels, not raw code names, in the brief.
     assert "Teacher support satisfaction (Online)" in brief_text
     assert "teacher_support (Online)" not in brief_text
+
+    # brief.html: same guarantees, plus HTML-specific ones (excerpts, gauges).
+    html_text = (run_dir / "brief.html").read_text(encoding="utf-8")
+    for term in FORBIDDEN_STRINGS:
+        assert term not in html_text
+    assert "S9" not in html_text  # no rejected finding would ever be S9 here, but guards the pattern
+    assert all(r["finding_id"] in html_text for r in evidence_records if r["reviewer_status"] == "accept")
+    assert "Hughes" not in html_text
+    assert "Ignore all previous instructions" not in html_text
+    assert "Demo Analyst" in html_text
+    assert html_text.count("<blockquote") <= 2 * len(evidence_records)  # at most 2 excerpts per side per signal
+    assert 'style="width:61%"' in html_text  # S1's gauge fill, computed from real data
+    assert "Teacher support satisfaction" in html_text
+    assert "teacher_support" not in html_text
 
 
 def test_end_to_end_run_never_estimates_region_c_withdrawals(tmp_path):

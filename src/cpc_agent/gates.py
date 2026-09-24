@@ -20,6 +20,26 @@ from .evidence import readable_measure_label
 
 _TRUTHY = {"y", "yes", "true", "1"}
 _UNSPECIFIED_ANALYST = "(not provided)"
+MAX_EXCERPTS = 2
+
+
+def _default_excerpts(comment_ids: list[str]) -> list[str]:
+    """The default excerpt choice: the first two linked IDs by ID (the IDs
+    are already sorted when EvidenceRecord is built)."""
+    return comment_ids[:MAX_EXCERPTS]
+
+
+def _resolve_excerpts(requested: list[str] | None, linked_ids: list[str]) -> list[str]:
+    """Resolves an analyst's excerpt choice against the comments actually
+    linked to this signal. `requested=None` means "use the default"; an
+    explicit list (scripted or interactive) is filtered to only the IDs
+    that are genuinely linked (never invents an ID) and capped at
+    MAX_EXCERPTS, preserving the order the analyst gave."""
+    if requested is None:
+        return _default_excerpts(linked_ids)
+    linked_set = set(linked_ids)
+    filtered = [cid for cid in dict.fromkeys(requested) if cid in linked_set]
+    return filtered[:MAX_EXCERPTS]
 
 
 class Gates:
@@ -127,6 +147,19 @@ class Gates:
             text = comment.text if comment is not None else "(comment text unavailable)"
             print(f"    {comment_id}: {text}")
 
+    def _choose_excerpts_interactively(self, label: str, comment_ids: list[str]) -> list[str]:
+        if not comment_ids:
+            return []
+        default = _default_excerpts(comment_ids)
+        answer = self._prompt(
+            f"Which up to {MAX_EXCERPTS} {label} comment(s) should appear as excerpts in the brief "
+            f"(comma-separated IDs, default {', '.join(default)}): "
+        ).strip()
+        if not answer:
+            return default
+        requested = [c.strip() for c in answer.split(",") if c.strip()]
+        return _resolve_excerpts(requested, comment_ids)
+
     def review_findings(
         self,
         records: list["EvidenceRecord"],
@@ -140,9 +173,13 @@ class Gates:
                 if isinstance(entry, dict):
                     decision = entry.get("decision", "accept")
                     note = entry.get("note", "")
+                    excerpts_entry = entry.get("excerpts", {}) or {}
                 else:
                     decision = entry
                     note = ""
+                    excerpts_entry = {}
+                aligned_excerpts = _resolve_excerpts(excerpts_entry.get("aligned"), record.aligned_ids)
+                countervailing_excerpts = _resolve_excerpts(excerpts_entry.get("countervailing"), record.countervailing_ids)
             else:
                 label = readable_measure_label(record.measure, record.segment)
                 print(f"--- {record.finding_id}: {label} — {record.evidence_status} ---")
@@ -152,11 +189,23 @@ class Gates:
                 answer = self._prompt("accept / edit / reject: ").lower()
                 decision = answer if answer in ("accept", "edit", "reject") else "accept"
                 note = self._prompt("Note: ") if decision == "edit" else ""
+                aligned_excerpts = self._choose_excerpts_interactively("aligned", record.aligned_ids)
+                countervailing_excerpts = self._choose_excerpts_interactively("countervailing", record.countervailing_ids)
             decision = decision if decision in ("accept", "edit", "reject") else "accept"
             record.reviewer = self.analyst_name or _UNSPECIFIED_ANALYST
             record.reviewer_status = decision
             record.reviewer_note = note
-            self._log("findings_review", finding_id=record.finding_id, analyst=record.reviewer, decision=decision, note=note)
+            record.aligned_excerpt_ids = aligned_excerpts
+            record.countervailing_excerpt_ids = countervailing_excerpts
+            self._log(
+                "findings_review",
+                finding_id=record.finding_id,
+                analyst=record.reviewer,
+                decision=decision,
+                note=note,
+                aligned_excerpt_ids=aligned_excerpts,
+                countervailing_excerpt_ids=countervailing_excerpts,
+            )
         return records
 
     # --- 9. Final approval gate --------------------------------------------

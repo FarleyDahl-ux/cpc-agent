@@ -266,3 +266,80 @@ chosen and recorded here.
   withdrawal_rate is labelled "Withdrawal rate (segment)" rather than
   "Segment withdrawal rate (segment)" — the segment name is already in the
   parenthetical, so repeating "segment" in the label was redundant.
+
+## brief.html — one-page design brief, built from docs/brief_mockup.html
+
+- **The mockup's `<style>` block is read live from `docs/brief_mockup.html`
+  at generation time, never hand-copied into Python.**
+  `brief._load_mockup_style` slices the file between `<style>` and
+  `</style>` and inlines it verbatim into every `brief.html`. If the mockup
+  is redesigned later (colours, spacing, print margins), `brief.html`
+  picks it up automatically with no code change — the mockup stays the
+  single source of truth for how the brief looks, and CLAUDE.md's
+  "populate the template" pattern (already used for `cpc_brief_template.txt`)
+  extends naturally to a second, HTML-flavoured template.
+- **The markup structure is generated per accepted record, not by
+  substituting into the mockup's fixed 4-`<article>` body.** The mockup
+  hard-codes S1–S4 because that's what this run's data happens to produce;
+  a different run could flag a different number of signals (from zero up
+  to CLAUDE.md's design space), so `render_brief_html` builds one
+  `<article class="signal">` per accepted record in Python, reusing the
+  mockup's exact class names and layout pattern (measure column + evidence
+  column + footer-row) rather than treating the mockup's body as literal
+  text to anchor-replace. `populate_cpc_template`'s plain-text approach
+  (anchor substitution) works for `cpc_brief_template.txt` because that
+  template has one fixed table/list per section; the HTML mockup's
+  per-signal repetition doesn't fit that pattern.
+- **`EvidenceRecord` gained `value` (the signal's raw number, e.g. 61.0)
+  and `details` (a copy of `Signal.details`: org average, previous-year
+  value, median unit rate, unit title, etc.), populated in
+  `build_evidence_record`.** Without these, brief.py would have had to
+  re-parse them out of the already-formatted `calculation`/`comparison_rule`
+  strings, which is exactly the kind of hard-coding-by-another-name the
+  brief asked to avoid — the gauge fill and every mark position are
+  computed straight from these fields (`brief._gauge_marks`,
+  `_render_gauge`), not from any per-signal template.
+- **Excerpt selection is a new, explicit part of the findings review gate**
+  (`EvidenceRecord.aligned_excerpt_ids`/`countervailing_excerpt_ids`, set in
+  `Gates.review_findings`), not inferred automatically. `gates._resolve_excerpts`
+  treats `None` as "use the default" (first two linked IDs — the lists are
+  already sorted when `build_evidence_record` runs) and an explicit list
+  (scripted `excerpts: {"aligned": [...], "countervailing": [...]}`, or an
+  interactive comma-separated answer) as the analyst's choice; either way
+  it filters to IDs that are genuinely linked to that signal and caps at
+  `MAX_EXCERPTS = 2`, so an analyst (or a malformed scripted answer) can
+  never make an unlinked or quarantined ID appear as an excerpt — there is
+  no code path from "not in `aligned_ids`/`countervailing_ids`" to
+  "rendered in the brief".
+- **`brief.html` is generated once, after gate 9, unlike `brief.md`'s
+  write-then-patch (`populate_cpc_template` then `update_brief_status`).**
+  The HTML approval block reads differently depending on the decision
+  ("Approved for the workshop by…" / "Returned for revision by…" /
+  "Prepared by… Pending approval"), and by the time it's generated the
+  decision is already known — a single render is simpler and avoids a
+  second string-patching pass like the one `.md` needs (`.md`'s two-phase
+  approach exists because its file is shown to the analyst *before* they
+  decide, at gate 9 itself; `.html` is not).
+- **A close-together mark pair on the gauge (within 8 percentage points)
+  pushes the second label upward** (`_render_gauge`'s `bumped` check),
+  mirroring the mockup's own S1 example (2024: 66% and avg 72%, 6 points
+  apart, with the avg label raised). This is a presentational anti-overlap
+  heuristic, not semantically tested — it only affects label placement,
+  never which values are shown.
+- **HTML text is escaped with `html.escape(..., quote=False)`.** Every
+  value here is inserted into text content, never into an HTML attribute,
+  so quotes don't need escaping; using `quote=False` keeps a comment like
+  *"Not sure what 'demonstrate an understanding' means…"* rendering with
+  literal apostrophes instead of `&#x27;` artifacts, while `&`/`<`/`>` are
+  still escaped for safety.
+- **One-A4-page scope**: the mockup's print sizing (`@page { size: A4 }`,
+  point/millimetre units throughout) is preserved verbatim and unmodified,
+  and the generated markup for this course's actual 4 signals reproduces
+  the mockup's density almost exactly (confirmed visually against a
+  locally rendered run). No auto-scaling or overflow handling was built for
+  a hypothetical run with many more flagged signals than this course
+  produces — CLAUDE.md's "don't add unrequested robustness" principle
+  applies, and the brief is meant to summarise a handful of thresholds
+  anyway (not dozens). Documented here as a known limitation rather than
+  engineered around, since doing so would need real pagination logic that
+  nothing in this brief asked for.

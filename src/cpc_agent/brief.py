@@ -1,10 +1,14 @@
-"""Fills data/cpc_brief_template.txt from accepted/edited evidence records only."""
+"""Fills data/cpc_brief_template.txt (brief.md) and docs/brief_mockup.html's
+design (brief.html) from accepted/edited evidence records only."""
 from __future__ import annotations
 
+from datetime import datetime
+from html import escape as _html_escape
 from pathlib import Path
 
 from . import config
 from .evidence import EvidenceRecord, humanize_measure, readable_measure_label
+from .screening import EligibleComment
 from .validation import ScopeContext
 
 STATUS_BY_DECISION = {
@@ -15,6 +19,9 @@ STATUS_BY_DECISION = {
 
 DRAFT_TITLE = "# DRAFT — Course Performance Workshop Brief (not approved)"
 APPROVED_TITLE = "# Course Performance Workshop Brief"
+
+MOCKUP_PATH = config.BASE_DIR / "docs" / "brief_mockup.html"
+MAX_HTML_EXCERPTS = 2
 
 
 def _scope_text(context: ScopeContext) -> str:
@@ -53,32 +60,38 @@ def _feedback_block(record: EvidenceRecord) -> str:
     return "\n".join(lines)
 
 
-def _exception_lines(exceptions: dict) -> list[str]:
-    lines: list[str] = []
+def _exception_details(exceptions: dict) -> list[str]:
+    details: list[str] = []
     for entry in exceptions.get("exclusions", []):
-        lines.append(f"- {entry['detail']}")
+        details.append(entry["detail"])
     for entry in exceptions.get("quarantined", []):
-        lines.append(f"- {entry['detail']}")
+        details.append(entry["detail"])
     for entry in exceptions.get("limitations", []):
-        lines.append(f"- {entry['detail']}")
-    return lines
+        details.append(entry["detail"])
+    return details
 
 
-def _question_for(record: EvidenceRecord) -> str:
+def _exception_lines(exceptions: dict) -> list[str]:
+    return [f"- {detail}" for detail in _exception_details(exceptions)]
+
+
+def _question_text(record: EvidenceRecord) -> str:
     if record.measure == "unit_withdrawal_rate":
-        text = f"What conditions around {record.segment} might be relevant to its withdrawal rate in {record.period}?"
-    elif record.measure == "segment_withdrawal_rate":
-        text = (
+        return f"What conditions around {record.segment} might be relevant to its withdrawal rate in {record.period}?"
+    if record.measure == "segment_withdrawal_rate":
+        return (
             f"What support or delivery conditions might be relevant to the change in withdrawal "
             f"rate for {record.segment} learners in {record.period}?"
         )
-    else:
-        measure_label = humanize_measure(record.measure)
-        text = (
-            f"What support or delivery conditions might be relevant to {measure_label} satisfaction "
-            f"for {record.segment} learners in {record.period}?"
-        )
-    return f"- {record.finding_id}: {text}"
+    measure_label = humanize_measure(record.measure)
+    return (
+        f"What support or delivery conditions might be relevant to {measure_label} satisfaction "
+        f"for {record.segment} learners in {record.period}?"
+    )
+
+
+def _question_for(record: EvidenceRecord) -> str:
+    return f"- {record.finding_id}: {_question_text(record)}"
 
 
 def populate_cpc_template(
@@ -160,3 +173,313 @@ def update_brief_status(brief_path: Path, decision: str) -> None:
     if decision == "approve":
         text = text.replace(DRAFT_TITLE, APPROVED_TITLE)
     brief_path.write_text(text, encoding="utf-8")
+
+
+# --- brief.html: docs/brief_mockup.html's design, filled from run data ----
+#
+# The mockup is the single source of truth for styling (fonts, colours,
+# spacing, one-A4-page layout) — its <style> block is read verbatim and
+# reused here. The markup structure below mirrors the mockup's, but is
+# built per accepted record rather than hard-coded for a fixed signal
+# count, since a real run can flag any number of signals.
+
+
+def _escape(value: object) -> str:
+    # quote=False: everything below is inserted into text content, never
+    # into an HTML attribute, so quotes need no escaping — and leaving
+    # them as literal ' / " keeps comment excerpts exactly as written.
+    return _html_escape(str(value), quote=False)
+
+
+def _format_date(iso_date: str) -> str:
+    try:
+        parsed = datetime.strptime(iso_date, "%Y-%m-%d")
+    except ValueError:
+        return iso_date
+    return f"{parsed.day} {parsed.strftime('%B %Y')}"
+
+
+def _load_mockup_style(mockup_path: Path) -> str:
+    html_text = mockup_path.read_text(encoding="utf-8")
+    start = html_text.index("<style>")
+    end = html_text.index("</style>") + len("</style>")
+    return html_text[start:end]
+
+
+def _signal_kind(measure: str) -> str:
+    if measure == "unit_withdrawal_rate":
+        return "unit"
+    if measure == "segment_withdrawal_rate":
+        return "segment"
+    return "satisfaction"
+
+
+def _measure_id_line(record: EvidenceRecord) -> str:
+    kind = _signal_kind(record.measure)
+    n_fmt = f"{record.n:,.0f}"
+    if kind == "satisfaction":
+        return f"{record.finding_id} · learner survey, {record.segment} (n={n_fmt})"
+    if kind == "unit":
+        return f"{record.finding_id} · unit results (n={n_fmt} enrolments)"
+    return f"{record.finding_id} · enrolment records, {record.segment} (n={n_fmt})"
+
+
+def _measure_title(record: EvidenceRecord) -> str:
+    kind = _signal_kind(record.measure)
+    if kind == "satisfaction":
+        return f"{humanize_measure(record.measure).capitalize()} satisfaction"
+    if kind == "unit":
+        unit_title = record.details.get("unit_title", "")
+        return f"Withdrawals from {record.segment} {unit_title}".strip()
+    return f"{record.segment} withdrawal rate"
+
+
+def _value_suffix(record: EvidenceRecord) -> str:
+    return "satisfied" if _signal_kind(record.measure) == "satisfaction" else "withdrew"
+
+
+def _gauge_marks(record: EvidenceRecord) -> list[tuple[float, str]]:
+    kind = _signal_kind(record.measure)
+    details = record.details
+    marks: list[tuple[float, str]] = []
+    if kind == "satisfaction":
+        prev = details.get("prev_pct_satisfied")
+        if prev is not None:
+            marks.append((prev, f"{config.PREVIOUS_PERIOD}: {prev:.0f}%"))
+        org_avg = details.get("organisation_avg_pct")
+        if org_avg is not None:
+            marks.append((org_avg, f"avg {org_avg:.0f}%"))
+    elif kind == "unit":
+        median = details.get("median_unit_withdrawal_rate")
+        if median is not None:
+            marks.append((median, f"typical unit: {median:.1f}%"))
+    else:
+        prev_rate = details.get("prev_rate")
+        if prev_rate is not None:
+            marks.append((prev_rate, f"{config.PREVIOUS_PERIOD}: {prev_rate:.0f}%"))
+    return marks
+
+
+def _render_gauge(value: float, marks: list[tuple[float, str]]) -> str:
+    ordered = sorted(marks, key=lambda m: m[0])
+    mark_divs = []
+    for index, (position, label) in enumerate(ordered):
+        # Nudge a label's second close-by mark upward so the two don't overlap
+        # (mirrors the mockup's handling of e.g. a "2024: 66%" mark next to "avg 72%").
+        bumped = index > 0 and (position - ordered[index - 1][0]) < 8
+        span_style = ' style="top:-3.4mm"' if bumped else ""
+        mark_divs.append(f'<div class="mark" style="left:{position:.4g}%"><span{span_style}>{_escape(label)}</span></div>')
+    marks_html = "\n        ".join(mark_divs)
+    fill_width = max(0.0, min(100.0, value))
+    return (
+        '<div class="gauge">\n'
+        '        <div class="track"></div>\n'
+        f'        <div class="fill" style="width:{fill_width:.4g}%"></div>\n'
+        f"        {marks_html}\n"
+        "      </div>"
+    )
+
+
+def _render_measure_column(record: EvidenceRecord) -> str:
+    gauge_html = _render_gauge(record.value, _gauge_marks(record))
+    return (
+        '<div class="measure">\n'
+        f'      <div class="id">{_escape(_measure_id_line(record))}</div>\n'
+        f"      <h3>{_escape(_measure_title(record))}</h3>\n"
+        f'      <div class="value">{record.value:.0f}%<small>{_value_suffix(record)}</small></div>\n'
+        f"      {gauge_html}\n"
+        f'      <div class="rule">{_escape(record.comparison_rule)}</div>\n'
+        "    </div>"
+    )
+
+
+def _excerpt_blockquotes(excerpt_ids: list[str], comments_by_id: dict[str, EligibleComment], other: bool) -> str:
+    css_class = ' class="other"' if other else ""
+    parts = []
+    for comment_id in excerpt_ids[:MAX_HTML_EXCERPTS]:
+        comment = comments_by_id.get(comment_id)
+        # comments_by_id only ever holds eligible (non-quarantined) comments
+        # (built from screening_result.eligible in main.py) — a quarantined
+        # or otherwise-unknown id can only ever fall back to the placeholder.
+        text = _escape(comment.text) if comment is not None else "(comment text unavailable)"
+        parts.append(f"<blockquote{css_class}>{text}<cite>{_escape(comment_id)}</cite></blockquote>")
+    return "\n        ".join(parts)
+
+
+def _render_evidence_column(record: EvidenceRecord, comments_by_id: dict[str, EligibleComment]) -> str:
+    aligned_count = len(record.aligned_ids)
+    countervailing_count = len(record.countervailing_ids)
+    total = aligned_count + countervailing_count
+
+    blocks: list[str] = []
+    if aligned_count:
+        full_width = ' style="flex-basis:100%"' if not countervailing_count else ""
+        blocks.append(
+            f"<div{full_width}>\n"
+            f'        <h4>Comments consistent with this result ({aligned_count})</h4>\n'
+            f"        {_excerpt_blockquotes(record.aligned_excerpt_ids, comments_by_id, other=False)}\n"
+            "      </div>"
+        )
+    if countervailing_count:
+        full_width = ' style="flex-basis:100%"' if not aligned_count else ""
+        blocks.append(
+            f"<div{full_width}>\n"
+            f'        <h4 class="other">Comments pointing the other way ({countervailing_count})</h4>\n'
+            f"        {_excerpt_blockquotes(record.countervailing_excerpt_ids, comments_by_id, other=True)}\n"
+            "      </div>"
+        )
+    if not blocks:
+        blocks.append(
+            '<div style="flex-basis:100%">\n'
+            "        <h4>Comments</h4>\n"
+            '        <p class="none">No student comments relate to this finding. The group may need '
+            "other sources, such as teacher or unit coordinator input.</p>\n"
+            "      </div>"
+        )
+
+    if total == 0:
+        status_html = '<div class="status">No comment evidence</div>'
+    else:
+        plural = "s" if total != 1 else ""
+        status_html = f'<div class="status">{_escape(record.evidence_status)} evidence <em>· {total} comment{plural}</em></div>'
+    question_html = f'<div class="question">{_escape(_question_text(record))}</div>'
+
+    blocks_html = "\n      ".join(blocks)
+    return (
+        '<div class="evidence">\n'
+        f"      {blocks_html}\n"
+        '      <div class="footer-row">\n'
+        f"        {status_html}\n"
+        f"        {question_html}\n"
+        "      </div>\n"
+        "    </div>"
+    )
+
+
+def _render_signal_article(record: EvidenceRecord, comments_by_id: dict[str, EligibleComment]) -> str:
+    return (
+        '<article class="signal">\n'
+        f"    {_render_measure_column(record)}\n"
+        f"    {_render_evidence_column(record, comments_by_id)}\n"
+        "  </article>"
+    )
+
+
+def _render_header(context: ScopeContext, analyst_name: str, decision: str, generated_date: str, snapshot_date: str) -> str:
+    generated_readable = _format_date(generated_date)
+    if decision == "approve":
+        approval_lines = f"Approved for the workshop by\n      <strong>{_escape(analyst_name)}</strong>\n      {_escape(generated_readable)}"
+    elif decision == "return":
+        approval_lines = f"Returned for revision by\n      <strong>{_escape(analyst_name)}</strong>\n      {_escape(generated_readable)}"
+    else:
+        approval_lines = f"Prepared by\n      <strong>{_escape(analyst_name)}</strong>\n      Pending approval"
+    return (
+        "<header>\n"
+        "    <div>\n"
+        "      <h1>Course performance workshop brief</h1>\n"
+        f'      <p class="course">{_escape(context.course_code)} {_escape(context.course_title)}</p>\n'
+        f'      <p class="meta">{_escape(context.current_period)} results compared with '
+        f"{_escape(context.previous_period)}, data to {_escape(_format_date(snapshot_date))}</p>\n"
+        "    </div>\n"
+        '    <div class="approval">\n'
+        f"      {approval_lines}\n"
+        "    </div>\n"
+        "  </header>"
+    )
+
+
+def _render_context_section(context: ScopeContext, exceptions: dict) -> str:
+    present = [filename for _key, filename, is_present in context.files_found if is_present]
+    covers = (
+        "Findings that crossed the review thresholds this run, with the student comments that relate "
+        f"to each. Figures come from {', '.join(present)}."
+    )
+    items = _exception_details(exceptions)
+    if items:
+        items_html = "\n        ".join(f"<li>{_escape(item)}</li>" for item in items)
+    else:
+        items_html = "<li>None recorded.</li>"
+    return (
+        '<section class="context">\n'
+        "    <div>\n"
+        "      <h2>What this brief covers</h2>\n"
+        f"      <p>{_escape(covers)}</p>\n"
+        "    </div>\n"
+        "    <div>\n"
+        "      <h2>What's not included</h2>\n"
+        "      <ul>\n"
+        f"        {items_html}\n"
+        "      </ul>\n"
+        "    </div>\n"
+        "  </section>"
+    )
+
+
+def render_brief_html(
+    accepted_records: list[EvidenceRecord],
+    context: ScopeContext,
+    run_id: str,
+    data_version: str,
+    generated_date: str,
+    snapshot_date: str,
+    exceptions: dict,
+    analyst_name: str,
+    decision: str,
+    comments_by_id: dict[str, EligibleComment],
+    output_dir: Path,
+    mockup_path: Path = MOCKUP_PATH,
+) -> Path:
+    """Writes runs/<run_id>/brief.html from accepted_records only, styled
+    per docs/brief_mockup.html (read live from that file, not copy-pasted),
+    with every value, gauge position, excerpt, status and question filled
+    from the run's own data. At most MAX_HTML_EXCERPTS comments per side are
+    quoted, chosen at the findings review gate
+    (EvidenceRecord.aligned_excerpt_ids/countervailing_excerpt_ids);
+    quarantined comments can never appear because comments_by_id only ever
+    contains eligible comments."""
+    style_block = _load_mockup_style(mockup_path)
+    header_html = _render_header(context, analyst_name, decision, generated_date, snapshot_date)
+    context_html = _render_context_section(context, exceptions)
+    reading_html = (
+        '<p class="reading">Comments show what some students experienced. They can help the group '
+        "decide what to look into, but they don't show why a result happened.</p>"
+    )
+    if accepted_records:
+        signals_html = "\n\n  ".join(_render_signal_article(r, comments_by_id) for r in accepted_records)
+    else:
+        signals_html = '<p class="none">No approved findings.</p>'
+    footer_html = (
+        "<footer>\n"
+        "    <span>Prepared by the CPC Preparation Agent (synthetic test data). Full evidence records "
+        "are held with the run.</span>\n"
+        f"    <span>Run {_escape(run_id)}, data {_escape(data_version)}</span>\n"
+        "  </footer>"
+    )
+
+    html_doc = (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"<title>Course performance workshop brief — {_escape(context.course_code)}</title>\n"
+        '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
+        '<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;1,400&display=swap" rel="stylesheet">\n'
+        f"{style_block}\n"
+        "</head>\n"
+        "<body>\n"
+        '<main class="page">\n\n'
+        f"  {header_html}\n\n"
+        f"  {context_html}\n\n"
+        f"  {reading_html}\n\n"
+        f"  {signals_html}\n\n"
+        f"  {footer_html}\n"
+        "</main>\n"
+        "</body>\n"
+        "</html>\n"
+    )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "brief.html"
+    output_path.write_text(html_doc, encoding="utf-8")
+    return output_path

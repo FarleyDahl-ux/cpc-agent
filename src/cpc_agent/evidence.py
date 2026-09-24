@@ -68,8 +68,12 @@ class EvidenceRecord:
     source_file: str
     period: str
     n: float
+    value: float = 0.0
+    details: dict = field(default_factory=dict)
     aligned_ids: list[str] = field(default_factory=list)
     countervailing_ids: list[str] = field(default_factory=list)
+    aligned_excerpt_ids: list[str] = field(default_factory=list)
+    countervailing_excerpt_ids: list[str] = field(default_factory=list)
     themes: list[str] = field(default_factory=list)
     evidence_status: str = ""
     limitation: str = ""
@@ -123,6 +127,8 @@ def build_evidence_record(
         source_file=signal.source_file,
         period=signal.period,
         n=signal.n,
+        value=signal.value,
+        details=dict(signal.details),
         aligned_ids=sorted(set(aligned_ids)),
         countervailing_ids=sorted(set(countervailing_ids)),
         themes=sorted(set(themes)),

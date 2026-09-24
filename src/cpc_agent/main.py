@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import audit, config
-from .brief import populate_cpc_template, update_brief_status
+from .brief import populate_cpc_template, render_brief_html, update_brief_status
 from .evidence import build_evidence_record
 from .gates import Gates
 from .investigate import run_investigation
@@ -204,6 +204,21 @@ def run_pipeline(
 
     decision = gates.final_approval(brief_path)
     update_brief_status(brief_path, decision)
+
+    html_path = render_brief_html(
+        accepted,
+        context,
+        run_id,
+        data_version,
+        generated_date,
+        snapshot_date,
+        exceptions,
+        gates.analyst_name,
+        decision,
+        comments_by_id,
+        log.run_dir,
+    )
+    log.log_event("brief_html_written", path=str(html_path))
 
     (log.run_dir / "evidence_records.json").write_text(
         json.dumps([r.to_dict() for r in reviewed], indent=2), encoding="utf-8"

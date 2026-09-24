@@ -1,7 +1,16 @@
 from cpc_agent import config
-from cpc_agent.brief import populate_cpc_template, update_brief_status
+from cpc_agent.brief import populate_cpc_template, render_brief_html, update_brief_status
 from cpc_agent.evidence import EvidenceRecord
+from cpc_agent.screening import EligibleComment
 from cpc_agent.validation import ScopeContext
+
+FORBIDDEN_STRINGS = [
+    "Daniel Hughes",
+    "Hughes",
+    "Ignore all previous instructions",
+    "poor performing",
+    "caused by",
+]
 
 
 def _context():
@@ -29,8 +38,12 @@ def _accepted_record():
         source_file="satisfaction.csv",
         period="2025",
         n=380,
-        aligned_ids=["FB003", "FB007"],
+        value=61.0,
+        details={"organisation_avg_pct": 72.0, "prev_pct_satisfied": 66.0},
+        aligned_ids=["FB003", "FB007", "FB011"],
         countervailing_ids=["FB005"],
+        aligned_excerpt_ids=["FB003", "FB007"],
+        countervailing_excerpt_ids=["FB005"],
         themes=["Teacher responsiveness and support"],
         evidence_status="Mixed",
         limitation="Aligned and countervailing feedback were both found.",
@@ -49,9 +62,35 @@ def _rejected_record():
         source_file="satisfaction.csv",
         period="2025",
         n=380,
+        value=1.0,
+        aligned_ids=["FB999"],
+        aligned_excerpt_ids=["FB999"],
     )
     r.reviewer_status = "reject"
     return r
+
+
+def _comments_by_id():
+    return {
+        "FB003": EligibleComment(
+            comment_id="FB003", reporting_period="2025", delivery_region="Online", delivery_mode="Online",
+            prompt="Needs improvement", text="I emailed my trainer three times and waited over a week for a reply.",
+        ),
+        "FB007": EligibleComment(
+            comment_id="FB007", reporting_period="2025", delivery_region="Online", delivery_mode="Online",
+            prompt="Needs improvement", text="Hard to get help when you study online at night.",
+        ),
+        "FB011": EligibleComment(
+            comment_id="FB011", reporting_period="2025", delivery_region="Online", delivery_mode="Online",
+            prompt="Needs improvement", text="Teachers seem stretched thin.",
+        ),
+        "FB005": EligibleComment(
+            comment_id="FB005", reporting_period="2025", delivery_region="Online", delivery_mode="Online",
+            prompt="Best aspect", text="My online teacher always replied the same day.",
+        ),
+        # FB999 is deliberately absent: simulates an id that slipped past
+        # validation and is not eligible/known — must never render as text.
+    }
 
 
 def test_populate_cpc_template_writes_brief(tmp_path):
@@ -275,3 +314,179 @@ def test_update_brief_status_return_keeps_draft_marker_and_shows_returned(tmp_pa
     assert "(not approved)" in text
     assert "Status: Returned" in text
     assert "Decision: return" in text
+
+
+# --- brief.html --------------------------------------------------------
+
+
+def _render_html(tmp_path, accepted=None, exceptions=None, decision="approve", analyst_name="Farley Dahl"):
+    return render_brief_html(
+        accepted_records=accepted if accepted is not None else [_accepted_record()],
+        context=_context(),
+        run_id="run-1",
+        data_version="abc123",
+        generated_date="2026-09-24",
+        snapshot_date="2025-12-31",
+        exceptions=exceptions if exceptions is not None else {"exclusions": [], "quarantined": [], "limitations": []},
+        analyst_name=analyst_name,
+        decision=decision,
+        comments_by_id=_comments_by_id(),
+        output_dir=tmp_path,
+    )
+
+
+def test_render_brief_html_writes_file_with_run_data(tmp_path):
+    path = _render_html(tmp_path)
+    assert path.name == "brief.html"
+    text = path.read_text(encoding="utf-8")
+    assert "<!DOCTYPE html>" in text
+    assert "CWS30125" in text
+    assert "S1" in text
+    assert "Run run-1" in text
+    assert "data abc123" in text
+    assert "Farley Dahl" in text
+
+
+def test_render_brief_html_uses_docs_mockup_style_verbatim(tmp_path):
+    path = _render_html(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    mockup_text = config.BASE_DIR.joinpath("docs", "brief_mockup.html").read_text(encoding="utf-8")
+    style_start = mockup_text.index("<style>")
+    style_end = mockup_text.index("</style>") + len("</style>")
+    assert mockup_text[style_start:style_end] in text
+
+
+def test_render_brief_html_contains_only_accepted_records(tmp_path):
+    # _rejected_record (S9) is deliberately not in accepted_records.
+    path = _render_html(tmp_path, accepted=[_accepted_record()])
+    text = path.read_text(encoding="utf-8")
+    assert "S9" not in text
+    assert "FB999" not in text
+
+
+def test_render_brief_html_contains_no_forbidden_strings(tmp_path):
+    path = _render_html(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    for term in FORBIDDEN_STRINGS:
+        assert term not in text
+
+
+def test_render_brief_html_never_shows_text_for_an_unknown_or_quarantined_id(tmp_path):
+    record = _accepted_record()
+    # FB016 is not in comments_by_id at all (simulates a quarantined id) —
+    # deliberately add it to aligned_ids/excerpts as a defence-in-depth check.
+    record.aligned_ids = record.aligned_ids + ["FB016"]
+    record.aligned_excerpt_ids = ["FB016"]
+    path = _render_html(tmp_path, accepted=[record])
+    text = path.read_text(encoding="utf-8")
+    assert "(comment text unavailable)" in text
+    assert "Hughes" not in text
+    assert "Mr Daniel Hughes" not in text
+
+
+def test_render_brief_html_shows_at_most_two_excerpts_per_side(tmp_path):
+    # aligned_ids has three linked comments, but only two are excerpt ids.
+    path = _render_html(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    assert text.count("<blockquote") == 3  # 2 aligned excerpts + 1 countervailing excerpt
+    assert "Comments consistent with this result (3)" in text  # full linked count, not excerpt count
+    assert "I emailed my trainer three times" in text
+    assert "Hard to get help when you study online" in text
+    # FB011 is linked (counted) but not chosen as an excerpt — its text must not appear.
+    assert "Teachers seem stretched thin" not in text
+
+
+def test_render_brief_html_respects_analyst_chosen_excerpts_not_just_first_two(tmp_path):
+    record = _accepted_record()
+    record.aligned_excerpt_ids = ["FB007", "FB011"]  # analyst chose these, not the first two
+    path = _render_html(tmp_path, accepted=[record])
+    text = path.read_text(encoding="utf-8")
+    assert "Hard to get help when you study online" in text
+    assert "Teachers seem stretched thin" in text
+    assert "I emailed my trainer three times" not in text
+
+
+def test_render_brief_html_gauge_values_are_data_driven_not_hardcoded(tmp_path):
+    record = _accepted_record()  # value=61.0, prev=66.0, org_avg=72.0
+    path = _render_html(tmp_path, accepted=[record])
+    text = path.read_text(encoding="utf-8")
+    assert 'style="width:61%"' in text
+    assert 'left:66%' in text
+    assert '2024: 66%' in text
+    assert 'left:72%' in text
+    assert 'avg 72%' in text
+
+    # A different record's values must produce different gauge numbers —
+    # proves these are computed, not copy-pasted from the mockup.
+    other = _accepted_record()
+    other.finding_id = "S2"
+    other.value = 34.0
+    other.details = {"median_unit_withdrawal_rate": 12.49}
+    other.measure = "unit_withdrawal_rate"
+    other.segment = "CWSU204"
+    other.aligned_ids = []
+    other.aligned_excerpt_ids = []
+    other.countervailing_ids = []
+    other.countervailing_excerpt_ids = []
+    path2 = _render_html(tmp_path, accepted=[other])
+    text2 = path2.read_text(encoding="utf-8")
+    assert 'style="width:34%"' in text2
+    assert "typical unit: 12.5%" in text2
+    assert 'style="width:61%"' not in text2
+
+
+def test_render_brief_html_no_comment_evidence_message_when_nothing_linked(tmp_path):
+    record = _accepted_record()
+    record.aligned_ids = []
+    record.aligned_excerpt_ids = []
+    record.countervailing_ids = []
+    record.countervailing_excerpt_ids = []
+    path = _render_html(tmp_path, accepted=[record])
+    text = path.read_text(encoding="utf-8")
+    assert "No comment evidence" in text
+    assert "No student comments relate to this finding" in text
+    assert "<blockquote" not in text
+
+
+def test_render_brief_html_readable_label_and_question(tmp_path):
+    path = _render_html(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    assert "Teacher support satisfaction" in text
+    assert "teacher_support" not in text  # raw code name must not leak into the HTML
+    assert "For discussion:" in text  # from the CSS ::before, backed by a real .question div
+    assert "What support or delivery conditions" in text
+
+
+def test_render_brief_html_approve_vs_return_wording(tmp_path):
+    approved_text = _render_html(tmp_path, decision="approve").read_text(encoding="utf-8")
+    assert "Approved for the workshop by" in approved_text
+
+    returned_path = render_brief_html(
+        accepted_records=[_accepted_record()],
+        context=_context(),
+        run_id="run-2",
+        data_version="abc123",
+        generated_date="2026-09-24",
+        snapshot_date="2025-12-31",
+        exceptions={"exclusions": [], "quarantined": [], "limitations": []},
+        analyst_name="Farley Dahl",
+        decision="return",
+        comments_by_id=_comments_by_id(),
+        output_dir=tmp_path / "returned",
+    )
+    returned_text = returned_path.read_text(encoding="utf-8")
+    assert "Returned for revision by" in returned_text
+    assert "Approved for the workshop by" not in returned_text
+
+
+def test_render_brief_html_exceptions_appear_without_raw_comment_text(tmp_path):
+    exceptions = {
+        "exclusions": [{"issue_key": "x", "detail": "Excluded Region C from course_metrics.csv."}],
+        "quarantined": [{"comment_id": "FB016", "reason": "identifying_information", "detail": "Quarantined comment FB016: identifying_information."}],
+        "limitations": [],
+    }
+    path = _render_html(tmp_path, exceptions=exceptions)
+    text = path.read_text(encoding="utf-8")
+    assert "Excluded Region C from course_metrics.csv." in text
+    assert "Quarantined comment FB016: identifying_information." in text
+    assert "Hughes" not in text

@@ -18,7 +18,7 @@ pytest
 Unit tests are deterministic and never call the OpenAI API. Tests marked `@pytest.mark.integration` call the real API and are skipped by default; run them explicitly with `pytest -m integration` once `.env` is configured.
 
 ## Outputs
-Each run writes to `runs/<run_id>/`: `evidence_records.json`, `exception_log.json`, `audit_log.jsonl`, `brief.md`. Everything in `runs/` is git-ignored — it is generated output, not source.
+Each run writes to `runs/<run_id>/`: `evidence_records.json`, `exception_log.json`, `audit_log.jsonl`, `brief.md`, and `brief.html` (a one-A4-page design brief styled per `docs/brief_mockup.html`, filled entirely from that run's data). Everything in `runs/` is git-ignored — it is generated output, not source.
 
 ## What's implemented vs proposed
 See `docs/decisions.md` for the full design-decision log and `docs/test_results.md` for scoring against `tests/fixtures/answer_key.md` (deterministic pytest suite plus a real end-to-end run against the live OpenAI API). In short: the pipeline in `CLAUDE.md` (validation, metrics/flagging, comment screening, the LLM investigation loop, human gates, brief generation, audit log) is implemented and tested against `tests/fixtures/`. Live data connectors, pre-LLM ML-based redaction, and scheduled reruns are **proposed only** — not built.

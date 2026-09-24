@@ -1,7 +1,7 @@
 import json
 
 from cpc_agent.evidence import EvidenceRecord
-from cpc_agent.gates import Gates
+from cpc_agent.gates import Gates, MAX_EXCERPTS, _default_excerpts, _resolve_excerpts
 from cpc_agent.screening import EligibleComment
 from cpc_agent.validation import BlankValueIssue, LowSampleIssue
 
@@ -195,3 +195,107 @@ def test_scripted_final_approval_invalid_value_defaults_to_return(tmp_path):
     path = _write_answers(tmp_path, {"final_approval": "yolo"})
     gates = Gates(str(path))
     assert gates.final_approval("runs/x/brief.md") == "return"
+
+
+# --- excerpt selection ---------------------------------------------------
+
+
+def test_default_excerpts_is_first_two_by_id():
+    assert _default_excerpts(["FB003", "FB007", "FB011", "FB015"]) == ["FB003", "FB007"]
+    assert _default_excerpts(["FB003"]) == ["FB003"]
+    assert _default_excerpts([]) == []
+
+
+def test_resolve_excerpts_none_means_use_default():
+    assert _resolve_excerpts(None, ["FB003", "FB007", "FB011"]) == ["FB003", "FB007"]
+
+
+def test_resolve_excerpts_never_invents_an_id_not_actually_linked():
+    # FB999 was never linked to this signal — it must be dropped, not shown.
+    assert _resolve_excerpts(["FB999", "FB007"], ["FB003", "FB007", "FB011"]) == ["FB007"]
+
+
+def test_resolve_excerpts_caps_at_max_excerpts():
+    result = _resolve_excerpts(["FB003", "FB007", "FB011"], ["FB003", "FB007", "FB011"])
+    assert len(result) == MAX_EXCERPTS
+    assert result == ["FB003", "FB007"]
+
+
+def test_scripted_findings_review_defaults_excerpts_to_first_two(tmp_path):
+    path = _write_answers(tmp_path, {"findings_review": {"default": "accept"}})
+    gates = Gates(str(path))
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+        aligned_ids=["FB003", "FB007", "FB011", "FB015"], countervailing_ids=["FB005", "FB019"],
+    )
+    reviewed = gates.review_findings([record])
+    assert reviewed[0].aligned_excerpt_ids == ["FB003", "FB007"]
+    assert reviewed[0].countervailing_excerpt_ids == ["FB005", "FB019"]
+
+
+def test_scripted_findings_review_respects_explicit_excerpt_choice(tmp_path):
+    path = _write_answers(
+        tmp_path,
+        {
+            "findings_review": {
+                "S1": {"decision": "accept", "excerpts": {"aligned": ["FB011", "FB015"], "countervailing": ["FB019"]}}
+            }
+        },
+    )
+    gates = Gates(str(path))
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+        aligned_ids=["FB003", "FB007", "FB011", "FB015"], countervailing_ids=["FB005", "FB019"],
+    )
+    reviewed = gates.review_findings([record])
+    assert reviewed[0].aligned_excerpt_ids == ["FB011", "FB015"]
+    assert reviewed[0].countervailing_excerpt_ids == ["FB019"]
+
+
+def test_scripted_findings_review_ignores_excerpt_ids_not_actually_linked(tmp_path):
+    path = _write_answers(
+        tmp_path,
+        {"findings_review": {"S1": {"decision": "accept", "excerpts": {"aligned": ["FB999", "FB003"]}}}},
+    )
+    gates = Gates(str(path))
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+        aligned_ids=["FB003", "FB007"], countervailing_ids=[],
+    )
+    reviewed = gates.review_findings([record])
+    assert reviewed[0].aligned_excerpt_ids == ["FB003"]
+
+
+def test_interactive_findings_review_lets_analyst_choose_excerpts(monkeypatch):
+    gates = Gates(answers_path=None)
+    gates.analyst_name = "Farley Dahl"
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+        aligned_ids=["FB003", "FB007", "FB011"], countervailing_ids=["FB005"],
+    )
+    answers = iter(["accept", "FB007, FB011", "FB005"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    reviewed = gates.review_findings([record], comments_by_id={})
+
+    assert reviewed[0].aligned_excerpt_ids == ["FB007", "FB011"]
+    assert reviewed[0].countervailing_excerpt_ids == ["FB005"]
+
+
+def test_interactive_findings_review_blank_excerpt_answer_uses_default(monkeypatch):
+    gates = Gates(answers_path=None)
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+        aligned_ids=["FB003", "FB007", "FB011"], countervailing_ids=[],
+    )
+    answers = iter(["accept", "", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    reviewed = gates.review_findings([record], comments_by_id={})
+
+    assert reviewed[0].aligned_excerpt_ids == ["FB003", "FB007"]

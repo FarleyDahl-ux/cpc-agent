@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Course performance workshop brief — CWS30125</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1F3A44;       /* deep teal ink: headings, values */
+    --text: #33424A;      /* body */
+    --muted: #6B7880;     /* meta, labels */
+    --rule: #D9DEE2;      /* hairlines */
+    --wash: #F3F6F7;      /* quiet panels */
+    --signal: #B7791F;    /* this year's value on gauges */
+    --ref: #1F3A44;       /* benchmark markers */
+    --other: #4F7A63;     /* comments pointing the other way */
+  }
+  @page { size: A4; margin: 12mm 14mm 10mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--text); background: #fff;
+    font: 400 9.4pt/1.42 "Public Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+  .page { max-width: 190mm; margin: 0 auto; }
+
+  header { display: flex; justify-content: space-between; gap: 4mm; align-items: flex-end;
+           padding-bottom: 3mm; border-bottom: 1.5pt solid var(--ink); }
+  h1 { margin: 0; color: var(--ink); font-weight: 700; font-size: 16pt; line-height: 1.1; letter-spacing: -0.01em; }
+  .course { margin: 1.2mm 0 0; font-size: 10.5pt; color: var(--ink); }
+  .meta { margin: 0.8mm 0 0; color: var(--muted); font-size: 8.4pt; }
+  header > div:first-child { flex: 1; }
+  .approval { flex: 0 0 auto; text-align: right; font-size: 8.4pt; color: var(--muted); }
+  .approval strong { display: block; color: var(--ink); font-size: 10pt; font-weight: 600; }
+
+  .context { display: flex; gap: 6mm; margin: 2.6mm 0 0.6mm; font-size: 8.6pt; }
+  .context h2 { margin: 0 0 0.8mm; font-size: 8.6pt; font-weight: 600; color: var(--ink); }
+  .context p, .context ul { margin: 0; }
+  .context ul { padding-left: 3.6mm; }
+  .context li { margin: 0.3mm 0; }
+
+  .reading { margin: 2mm 0 0.6mm; padding: 2mm 3mm; background: var(--wash);
+             font: italic 400 9pt/1.4 "Source Serif 4", Georgia, serif; color: var(--ink); }
+
+  .signal { display: flex; gap: 5mm;
+            padding: 2.4mm 0; border-bottom: 0.6pt solid var(--rule); break-inside: avoid; }
+  .signal:last-of-type { border-bottom: 0; }
+
+  .measure .id { color: var(--muted); font-size: 8pt; }
+  .measure h3 { margin: 0.4mm 0 1.2mm; font-size: 10pt; font-weight: 600; color: var(--ink); line-height: 1.2; }
+  .value { font-size: 18pt; font-weight: 700; color: var(--ink); line-height: 1; }
+  .value small { font-size: 8.4pt; font-weight: 400; color: var(--muted); margin-left: 1mm; }
+
+  /* the gauge: this year's value against its reference points on one scale */
+  .gauge { position: relative; height: 9mm; margin: 2mm 0 0.5mm; }
+  .track { position: absolute; left: 0; right: 0; top: 3.2mm; height: 1.6mm; background: var(--wash); border-radius: 1mm; }
+  .fill { position: absolute; left: 0; top: 3.2mm; height: 1.6mm; background: var(--signal); border-radius: 1mm; }
+  .mark { position: absolute; top: 1.8mm; width: 0; height: 4.4mm; border-left: 1.2pt solid var(--ref); }
+  .mark span { position: absolute; top: 4.8mm; transform: translateX(-50%); white-space: nowrap; font-size: 6.8pt; color: var(--muted); }
+  .scale { display: flex; justify-content: space-between; font-size: 6.6pt; color: var(--muted); margin-top: 2.6mm; }
+  .rule { margin-top: 1.4mm; font-size: 7.8pt; color: var(--muted); }
+
+  .evidence { flex: 1; display: flex; flex-wrap: wrap; gap: 0 4mm; align-content: flex-start; }
+  .evidence > div { flex: 1 1 40%; }
+  .measure { flex: 0 0 50mm; }
+  .context > div { flex: 1; }
+  .evidence h4 { margin: 0 0 1mm; font-size: 8pt; font-weight: 600; color: var(--muted); }
+  .evidence h4.other { color: var(--other); }
+  blockquote { margin: 0 0 1mm; padding-left: 2.2mm; border-left: 1.4pt solid var(--signal);
+               font: 400 8.2pt/1.34 "Source Serif 4", Georgia, serif; color: var(--text); }
+  blockquote.other { border-left-color: var(--other); }
+  blockquote cite { display: block; font: 400 6.8pt/1.3 "Public Sans", Arial, sans-serif; color: var(--muted); font-style: normal; margin-top: 0.4mm; }
+  .none { margin: 0; font-size: 8.6pt; color: var(--muted); }
+  .evidence > .footer-row { flex: 1 1 100%; display: flex; gap: 3mm; align-items: baseline;
+                margin-top: 0.6mm; padding-top: 1.2mm; border-top: 0.6pt dotted var(--rule); }
+  .status { font-size: 7.8pt; font-weight: 600; color: var(--ink); white-space: nowrap; }
+  .status em { font-style: normal; font-weight: 400; color: var(--muted); }
+  .question { font-size: 8.8pt; color: var(--ink); }
+  .question::before { content: "For discussion: "; font-weight: 600; }
+
+  footer { margin-top: 1.5mm; padding-top: 1.5mm; border-top: 0.6pt solid var(--rule);
+           display: flex; justify-content: space-between; gap: 6mm; font-size: 7pt; color: var(--muted); }
+  @media screen and (max-width: 700px) {
+    .signal, .context, header { flex-direction: column; }
+    .measure { flex-basis: auto; }
+    .approval { text-align: left; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <header>
+    <div>
+      <h1>Course performance workshop brief</h1>
+      <p class="course">CWS30125 Certificate III in Community Wellbeing Support</p>
+      <p class="meta">2025 results compared with 2024, data to 31 December 2025</p>
+    </div>
+    <div class="approval">
+      Approved for the workshop by
+      <strong>Farley</strong>
+      24 September 2026
+    </div>
+  </header>
+
+  <section class="context">
+    <div>
+      <h2>What this brief covers</h2>
+      <p>Four results that crossed the review thresholds, with the student comments that relate to each. Figures come from enrolment records, unit results and the 2025 learner survey.</p>
+    </div>
+    <div>
+      <h2>What's not included</h2>
+      <ul>
+        <li>Region C (blended) withdrawals: the 2025 figure is missing and has not been estimated.</li>
+        <li>Two comments held back for review: one names a staff member, one contained text that was not feedback.</li>
+      </ul>
+    </div>
+  </section>
+
+  <p class="reading">Comments show what some students experienced. They can help the group decide what to look into, but they don't show why a result happened.</p>
+
+  <!-- S1 -->
+  <article class="signal">
+    <div class="measure">
+      <div class="id">S1 · learner survey, online (n=380)</div>
+      <h3>Teacher support satisfaction</h3>
+      <div class="value">61%<small>satisfied</small></div>
+      <div class="gauge">
+        <div class="track"></div>
+        <div class="fill" style="width:61%"></div>
+        <div class="mark" style="left:66%"><span>2024: 66%</span></div>
+        <div class="mark" style="left:72%;"><span style="top:-3.4mm">avg 72%</span></div>
+      </div>
+      <div class="rule">11 points below the organisation average, 5 below last year</div>
+    </div>
+    <div class="evidence">
+      <div>
+        <h4>Comments consistent with this result (4)</h4>
+        <blockquote>I emailed my trainer three times about an assessment and waited over a week for a reply.<cite>FB003</cite></blockquote>
+        <blockquote>Hard to get help when you study online at night. Questions in the forum sit there unanswered.<cite>FB007</cite></blockquote>
+      </div>
+      <div>
+        <h4 class="other">Comments pointing the other way (2)</h4>
+        <blockquote class="other">My online teacher always replied the same day and her feedback was really detailed.<cite>FB005</cite></blockquote>
+        <blockquote class="other">The Tuesday night drop-in sessions were a lifesaver.<cite>FB019</cite></blockquote>
+      </div>
+      <div class="footer-row">
+        <div class="status">Mixed evidence <em>· 6 comments</em></div>
+        <div class="question">What support or delivery conditions might be relevant to teacher support for online learners?</div>
+      </div>
+    </div>
+  </article>
+
+  <!-- S2 -->
+  <article class="signal">
+    <div class="measure">
+      <div class="id">S2 · learner survey, online (n=380)</div>
+      <h3>Assessment clarity satisfaction</h3>
+      <div class="value">58%<small>satisfied</small></div>
+      <div class="gauge">
+        <div class="track"></div>
+        <div class="fill" style="width:58%"></div>
+        <div class="mark" style="left:60%"><span>2024: 60%</span></div>
+        <div class="mark" style="left:63%"><span style="top:-3.4mm">avg 63%</span></div>
+      </div>
+      <div class="rule">5 points below the organisation average</div>
+    </div>
+    <div class="evidence">
+      <div>
+        <h4>Comments consistent with this result (3)</h4>
+        <blockquote>The assessment instructions didn't match what the marking guide asked for, so I had to resubmit.<cite>FB002</cite></blockquote>
+        <blockquote>Not sure what 'demonstrate an understanding' means in task 2. Some examples would help.<cite>FB009</cite></blockquote>
+      </div>
+      <div>
+        <h4 class="other">Comments pointing the other way (1)</h4>
+        <blockquote class="other">The assessment checklists made it clear exactly what I needed to submit.<cite>FB017</cite></blockquote>
+      </div>
+      <div class="footer-row">
+        <div class="status">Mixed evidence <em>· 4 comments</em></div>
+        <div class="question">What support or delivery conditions might be relevant to assessment clarity for online learners?</div>
+      </div>
+    </div>
+  </article>
+
+  <!-- S3 -->
+  <article class="signal">
+    <div class="measure">
+      <div class="id">S3 · unit results (n=1,600 enrolments)</div>
+      <h3>Withdrawals from CWSU204 Work within a legal and ethical framework</h3>
+      <div class="value">34%<small>withdrew</small></div>
+      <div class="gauge">
+        <div class="track"></div>
+        <div class="fill" style="width:34%"></div>
+        <div class="mark" style="left:12.5%"><span style="transform:none;left:-1mm">typical unit: 12.5%</span></div>
+      </div>
+      <div class="rule">Almost three times the typical unit in this course</div>
+    </div>
+    <div class="evidence">
+      <div style="flex-basis:100%">
+        <h4>Comments</h4>
+        <p class="none">No student comments relate to this unit. The group may need other sources, such as teacher or unit coordinator input.</p>
+      </div>
+      <div class="footer-row">
+        <div class="status">No comment evidence</div>
+        <div class="question">What conditions around CWSU204 might be relevant to its withdrawal rate?</div>
+      </div>
+    </div>
+  </article>
+
+  <!-- S4 -->
+  <article class="signal">
+    <div class="measure">
+      <div class="id">S4 · enrolment records, online (n=1,800)</div>
+      <h3>Online withdrawal rate</h3>
+      <div class="value">38%<small>withdrew</small></div>
+      <div class="gauge">
+        <div class="track"></div>
+        <div class="fill" style="width:38%"></div>
+        <div class="mark" style="left:31%"><span>2024: 31%</span></div>
+      </div>
+      <div class="rule">Up 7 percentage points on last year</div>
+    </div>
+    <div class="evidence">
+      <div style="flex-basis:100%">
+        <h4>Comments consistent with this result (1)</h4>
+        <blockquote>I nearly dropped out when I started a new job. I would have liked to pause the course instead of withdrawing.<cite>FB024</cite></blockquote>
+      </div>
+      <div class="footer-row">
+        <div class="status">Limited evidence <em>· 1 comment</em></div>
+        <div class="question">What support or delivery conditions might be relevant to the change in online withdrawals?</div>
+      </div>
+    </div>
+  </article>
+
+  <footer>
+    <span>Prepared by the CPC Preparation Agent (synthetic test data). Full evidence records are held with the run.</span>
+    <span>Run 20260924T075035Z-3ed5ac26, data 8a108852f123</span>
+  </footer>
+</main>
+</body>
+</html>
