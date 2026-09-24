@@ -76,3 +76,33 @@ chosen and recorded here.
   a specific finding; nothing in the deterministic pipeline currently
   infers it automatically, so it is left as a hook the investigation stage
   (phase 4) or a human gate can set explicitly, rather than guessed at.
+
+## Phase 4 — LLM investigation loop
+
+- **The loop is skipped entirely (no API call) when there are no flagged
+  signals, or no eligible comments at all** (missing `student_feedback.csv`,
+  or every comment quarantined). In the no-eligible-comments case every
+  signal is marked "No qualitative evidence" via a deterministic
+  `note_no_evidence` call rather than asking the model to discover an empty
+  search result on its own. This avoids an unnecessary, costly API call for
+  a quantitative-only run and keeps that path fully deterministic and
+  testable without a key.
+- **`record_link` treats "unknown comment_id" and "quarantined comment_id"
+  identically** — both simply raise `ToolError("Unknown or quarantined
+  comment_id")`. `InvestigationTools` only ever receives the *eligible*
+  comments from `screening.screen_comments`, so a quarantined ID is
+  indistinguishable from a nonexistent one from the tool's point of view;
+  the quarantine boundary is enforced earlier, in code, per the
+  architecture's "hard boundaries" principle.
+- **`audit_log_tool_call_fn` receives every tool call's name and parsed
+  args, including failed/malformed ones**, but is never given a tool's
+  *result*. Since no tool argument schema includes raw comment text (only
+  IDs, relations, themes and analyst-facing rationale/question strings),
+  this guarantees the audit log can never contain quarantined or even
+  eligible comment text, satisfying "tool calls (name + args, no comment
+  text)" (CLAUDE.md §7) without needing a redaction pass.
+- **An assistant turn with no tool calls ends the loop** (treated the same
+  as `finish_investigation`, but without setting `tools.finished`), so a
+  model that stops calling tools — rather than explicitly finishing —
+  cannot hang the run. `main.py` (phase 5) checks `tools.finished` and
+  logs a limitation if the loop ended without it.
