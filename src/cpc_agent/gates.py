@@ -49,13 +49,25 @@ def _excerpt_selection_label(was_automatic: bool) -> str:
 
 
 class Gates:
-    def __init__(self, answers_path: str | Path | None = None, audit: "AuditLog | None" = None):
+    def __init__(
+        self,
+        answers_path: str | Path | None = None,
+        audit: "AuditLog | None" = None,
+        answers: dict | None = None,
+    ):
+        """Scripted mode is driven either by a JSON file (`answers_path`,
+        the CLI's `--answers`) or by an in-memory dict (`answers`, used by
+        the web dashboard to auto-resolve the pre-review gates with a
+        fixed default policy without writing a temp file). Passing both is
+        not meaningful; `answers_path` wins if both are given."""
         self.audit = audit
-        self.scripted = answers_path is not None
+        self.scripted = answers_path is not None or answers is not None
         self.answers: dict = {}
         self.analyst_name: str = ""
-        if self.scripted:
+        if answers_path is not None:
             self.answers = json.loads(Path(answers_path).read_text(encoding="utf-8"))
+        elif answers is not None:
+            self.answers = answers
 
     def _log(self, gate: str, **fields) -> None:
         if self.audit is not None:

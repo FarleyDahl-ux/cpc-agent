@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CPC Preparation Agent — dashboard prototype</title>
+<style>
+  :root {
+    --ink:#1F3A44; --text:#33424A; --muted:#6B7880; --rule:#D9DEE2; --wash:#F3F6F7;
+    --human:#9A6415; --human-soft:#FFF4E0; --human-line:#E8C98A;
+    --agent-soft:#E3F0FC; --agent-line:#C9DCEE; --agent:#0B4F99;
+    --other:#4F7A63; --bad:#9B3B2E; --ok:#2F6B4F;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:400 14px/1.5 "Segoe UI","Helvetica Neue",Arial,sans-serif; color:var(--text); background:#fff; }
+  button { font:inherit; cursor:pointer; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--agent); outline-offset:2px; }
+  .app { display:grid; grid-template-columns:270px 1fr; min-height:100vh; }
+
+  /* sidebar */
+  aside { background:var(--wash); border-right:1px solid var(--rule); padding:20px 18px; display:flex; flex-direction:column; gap:22px; }
+  .brand { font-weight:700; color:var(--ink); font-size:16px; line-height:1.25; }
+  .brand small { display:block; font-weight:400; color:var(--muted); font-size:12px; margin-top:2px; }
+  .new-run { background:var(--ink); color:#fff; border:0; border-radius:8px; padding:9px 12px; text-align:left; }
+  .side-h { font-size:12px; color:var(--muted); margin:0 0 6px; }
+  .runs { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .runs button { width:100%; text-align:left; background:#fff; border:1px solid var(--rule); border-radius:8px; padding:8px 10px; color:var(--text); }
+  .runs button[aria-current="true"] { border-color:var(--ink); box-shadow:inset 3px 0 0 var(--ink); }
+  .runs .rid { display:block; font-size:12px; color:var(--muted); }
+  .chip { display:inline-block; font-size:11.5px; padding:1px 8px; border-radius:999px; margin-top:4px; }
+  .chip.you { background:var(--human-soft); color:var(--human); border:1px solid var(--human-line); }
+  .chip.done { background:#E8F1EC; color:var(--ok); }
+  .chip.ret { background:#F6E7E4; color:var(--bad); }
+  .steps { list-style:none; margin:0; padding:0; }
+  .steps li { display:grid; grid-template-columns:18px 1fr; gap:8px; align-items:start; padding:4px 0; font-size:13px; }
+  .dot { width:12px; height:12px; border-radius:50%; margin-top:4px; border:2px solid var(--agent-line); background:#fff; }
+  .steps .done .dot { background:var(--agent); border-color:var(--agent); }
+  .steps .human.done .dot { background:var(--human); border-color:var(--human); }
+  .steps .now .dot { background:var(--human-soft); border-color:var(--human); box-shadow:0 0 0 3px var(--human-soft); }
+  .steps .now { color:var(--human); font-weight:600; }
+  .steps .todo { color:var(--muted); }
+  .key { font-size:12px; color:var(--muted); display:flex; gap:12px; }
+  .key span::before { content:""; display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; vertical-align:0; }
+  .key .a::before { background:var(--agent); } .key .h::before { background:var(--human); }
+
+  /* main */
+  main { padding:22px 32px 40px; max-width:1100px; }
+  .top { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; border-bottom:1px solid var(--rule); padding-bottom:14px; }
+  h1 { margin:0; font-size:21px; color:var(--ink); line-height:1.25; }
+  .sub { color:var(--muted); font-size:13px; margin-top:2px; }
+  .waiting { background:var(--human-soft); border:1px solid var(--human-line); color:var(--human); border-radius:8px; padding:8px 12px; font-size:13px; max-width:300px; }
+  .waiting strong { display:block; color:#7A4B00; }
+  nav { display:flex; gap:4px; margin:16px 0 18px; border-bottom:1px solid var(--rule); }
+  nav button { background:none; border:0; border-bottom:2px solid transparent; padding:8px 12px; color:var(--muted); }
+  nav button[aria-selected="true"] { color:var(--ink); border-bottom-color:var(--ink); font-weight:600; }
+  .panel[hidden] { display:none; }
+  h2 { font-size:15px; color:var(--ink); margin:0 0 10px; }
+
+  /* overview */
+  .tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:22px; }
+  .tile { border:1px solid var(--rule); border-radius:10px; padding:12px 14px; }
+  .tile .lbl { font-size:12.5px; color:var(--muted); }
+  .tile .val { font-size:26px; font-weight:700; color:var(--ink); line-height:1.2; }
+  .tile .cmp { font-size:12.5px; }
+  .status { font-size:12px; font-weight:600; color:var(--ink); }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  .list { margin:0; padding-left:18px; }
+  .list li { margin:4px 0; }
+  .note { font-size:13px; color:var(--muted); }
+
+  /* findings */
+  .finding { border:1px solid var(--rule); border-radius:10px; padding:16px 18px; margin-bottom:14px; }
+  .finding.accepted { border-color:#B9D6C5; background:#FAFDFB; }
+  .finding.rejected { opacity:.62; }
+  .f-head { display:flex; justify-content:space-between; gap:16px; align-items:baseline; }
+  .f-head h3 { margin:0; font-size:15px; color:var(--ink); }
+  .f-head .v { font-size:13px; color:var(--muted); }
+  .ev { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:12px; }
+  .ev h4 { margin:0 0 6px; font-size:12.5px; color:var(--muted); font-weight:600; }
+  .ev h4.o { color:var(--other); }
+  .c { display:grid; grid-template-columns:18px 1fr; gap:8px; padding:6px 8px; border-radius:6px; font-size:13.5px; }
+  .c:hover { background:var(--wash); }
+  .c .id { display:block; font-size:11.5px; color:var(--muted); }
+  .c input { margin-top:3px; accent-color:var(--human); }
+  .excerpt-hint { font-size:12px; color:var(--muted); margin-top:4px; }
+  .decide { display:flex; gap:8px; align-items:center; margin-top:12px; padding-top:12px; border-top:1px dashed var(--rule); flex-wrap:wrap; }
+  .decide .who { font-size:12.5px; color:var(--human); margin-right:auto; }
+  .btn { border-radius:8px; padding:6px 14px; border:1px solid var(--rule); background:#fff; color:var(--ink); }
+  .btn.acc[aria-pressed="true"] { background:var(--ok); color:#fff; border-color:var(--ok); }
+  .btn.ed[aria-pressed="true"] { background:var(--human); color:#fff; border-color:var(--human); }
+  .btn.rej[aria-pressed="true"] { background:var(--bad); color:#fff; border-color:var(--bad); }
+  textarea { width:100%; margin-top:10px; border:1px solid var(--human-line); border-radius:8px; padding:8px; font:inherit; min-height:56px; }
+  .none { font-size:13.5px; color:var(--muted); padding:6px 8px; }
+  .progress-line { font-size:13px; color:var(--muted); margin-bottom:12px; }
+
+  /* activity */
+  .trace { list-style:none; margin:0; padding:0; border-left:2px solid var(--agent-line); margin-left:6px; }
+  .trace li { position:relative; padding:0 0 14px 18px; }
+  .trace li::before { content:""; position:absolute; left:-7px; top:5px; width:12px; height:12px; border-radius:50%; background:var(--agent-soft); border:2px solid var(--agent); }
+  .trace li.h::before { background:var(--human-soft); border-color:var(--human); }
+  .trace li.g::before { background:#fff; border-color:var(--muted); }
+  .t-time { font-size:11.5px; color:var(--muted); }
+  .t-what { color:var(--ink); font-weight:600; font-size:13.5px; }
+  .t-why { font-size:13px; }
+  .t-res { font-size:12.5px; color:var(--muted); }
+  .illus { font-size:12px; color:var(--muted); background:var(--wash); padding:6px 10px; border-radius:6px; margin-bottom:14px; }
+
+  /* brief */
+  .brief-frame { border:1px solid var(--rule); border-radius:10px; padding:18px 22px; background:#fff; }
+  .brief-frame h3 { margin:0 0 4px; color:var(--ink); }
+  .approve-bar { display:flex; gap:10px; align-items:center; margin-top:16px; padding:14px 16px; background:var(--human-soft); border:1px solid var(--human-line); border-radius:10px; }
+  .approve-bar p { margin:0 auto 0 0; color:#7A4B00; font-size:13.5px; }
+  .btn.primary { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .sr { position:absolute; left:-9999px; }
+
+  @media (max-width:900px) {
+    .app { grid-template-columns:1fr; } aside { border-right:0; border-bottom:1px solid var(--rule); }
+    .tiles { grid-template-columns:repeat(2,1fr); } .cols, .ev { grid-template-columns:1fr; } main { padding:18px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">CPC Preparation Agent<small>Prepares evidence. You decide.</small></div>
+    <button class="new-run" type="button">Start a new run</button>
+    <div>
+      <p class="side-h">Runs</p>
+      <ul class="runs">
+        <li><button type="button" aria-current="true">CWS30125 · 2025<span class="rid">Started today, 9:14 am</span><span class="chip you">Waiting for you</span></button></li>
+        <li><button type="button">CWS30125 · 2025<span class="rid">Yesterday, 4:02 pm</span><span class="chip ret">Returned</span></button></li>
+        <li><button type="button">CWS30125 · 2025<span class="rid">Yesterday, 11:30 am</span><span class="chip done">Approved</span></button></li>
+      </ul>
+    </div>
+    <div>
+      <p class="side-h">Progress</p>
+      <ol class="steps" id="steps">
+        <li class="human done"><span class="dot"></span>Scope confirmed</li>
+        <li class="done"><span class="dot"></span>Data validated</li>
+        <li class="human done"><span class="dot"></span>Missing value resolved</li>
+        <li class="done"><span class="dot"></span>Metrics calculated</li>
+        <li class="done"><span class="dot"></span>Comments screened</li>
+        <li class="done"><span class="dot"></span>Evidence investigated</li>
+        <li class="now" id="step-review"><span class="dot"></span>Review findings</li>
+        <li class="todo" id="step-brief"><span class="dot"></span>Brief drafted</li>
+        <li class="todo" id="step-final"><span class="dot"></span>Final approval</li>
+      </ol>
+    </div>
+    <div class="key"><span class="a">Agent</span><span class="h">You</span></div>
+  </aside>
+
+  <main>
+    <div class="top">
+      <div>
+        <h1>CWS30125 Certificate III in Community Wellbeing Support</h1>
+        <div class="sub">2025 compared with 2024 · Analyst: Farley · Run 20260925T091402Z</div>
+      </div>
+      <div class="waiting" id="waiting"><strong>Waiting for you</strong><span id="waiting-text">Review 4 findings before the brief can be drafted.</span></div>
+    </div>
+
+    <nav role="tablist" aria-label="Run sections">
+      <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
+      <button role="tab" aria-selected="false" data-tab="review">Review findings</button>
+      <button role="tab" aria-selected="false" data-tab="activity">Agent activity</button>
+      <button role="tab" aria-selected="false" data-tab="brief">Brief and approval</button>
+    </nav>
+
+    <!-- OVERVIEW -->
+    <section class="panel" id="overview" role="tabpanel">
+      <div class="tiles">
+        <div class="tile"><div class="lbl">Teacher support, online</div><div class="val">61%</div><div class="cmp">Average 72% · 2024 66%</div><div class="status">Mixed evidence</div></div>
+        <div class="tile"><div class="lbl">Assessment clarity, online</div><div class="val">58%</div><div class="cmp">Average 63% · 2024 60%</div><div class="status">Mixed evidence</div></div>
+        <div class="tile"><div class="lbl">CWSU204 withdrawals</div><div class="val">34%</div><div class="cmp">Typical unit 12.5%</div><div class="status">No comment evidence</div></div>
+        <div class="tile"><div class="lbl">Online withdrawal rate</div><div class="val">38%</div><div class="cmp">2024 31%</div><div class="status">Limited evidence</div></div>
+      </div>
+      <div class="cols">
+        <div>
+          <h2>What's been excluded or held back</h2>
+          <ul class="list">
+            <li>Region C blended delivery: the 2025 withdrawal figure was missing. You chose to exclude it; it was not estimated.</li>
+            <li>2 comments held back from the agent: one names a staff member, one contained text that wasn't feedback.</li>
+          </ul>
+        </div>
+        <div>
+          <h2>Your decisions so far</h2>
+          <ul class="list">
+            <li>9:14 am: confirmed scope and sources</li>
+            <li>9:15 am: excluded Region C blended withdrawals</li>
+          </ul>
+          <p class="note">Every decision is recorded with your name in the audit log.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- REVIEW -->
+    <section class="panel" id="review" role="tabpanel" hidden>
+      <p class="progress-line" id="review-progress">0 of 4 findings reviewed. Tick up to two comments per side to show as excerpts in the brief.</p>
+      <div id="findings"></div>
+    </section>
+
+    <!-- ACTIVITY -->
+    <section class="panel" id="activity" role="tabpanel" hidden>
+      <p class="illus">Illustrative trace for the prototype design. In the built version this is read from the run's audit log: tool names, search reasons and result IDs, never comment text.</p>
+      <ol class="trace">
+        <li class="h"><div class="t-time">9:14:02</div><div class="t-what">You confirmed scope</div></li>
+        <li><div class="t-time">9:14:03</div><div class="t-what">Validated 4 files</div><div class="t-res">Paused on 1 missing value</div></li>
+        <li class="h"><div class="t-time">9:15:20</div><div class="t-what">You excluded Region C blended withdrawals</div></li>
+        <li><div class="t-time">9:15:21</div><div class="t-what">Flagged 4 results and held back 2 comments</div></li>
+        <li><div class="t-time">9:15:24</div><div class="t-what">Checked what feedback is available</div><div class="t-res">22 eligible comments: 14 online, 5 blended, 3 face to face</div></li>
+        <li><div class="t-time">9:15:26</div><div class="t-what">Planned the investigation</div><div class="t-why">Start with teacher support and withdrawals; search both directions for each.</div></li>
+        <li><div class="t-time">9:15:29</div><div class="t-what">Searched online comments for "reply"</div><div class="t-why">Looking for experiences of teacher response times.</div><div class="t-res">3 results: FB003, FB011, FB015</div></li>
+        <li><div class="t-time">9:15:33</div><div class="t-what">Searched online comments for "same day"</div><div class="t-why">No contrary evidence yet; looking for positive support experiences.</div><div class="t-res">1 result: FB005</div></li>
+        <li><div class="t-time">9:15:36</div><div class="t-what">Searched for "CWSU204", then "legal"</div><div class="t-why">Unit code found nothing; tried the unit topic.</div><div class="t-res">0 results each</div></li>
+        <li><div class="t-time">9:15:38</div><div class="t-what">Recorded no comment evidence for CWSU204</div></li>
+        <li><div class="t-time">9:15:52</div><div class="t-what">Completeness check passed</div><div class="t-res">All 4 results searched in both directions or recorded as limited</div></li>
+        <li class="g"><div class="t-time">9:15:53</div><div class="t-what">Waiting for your review</div></li>
+      </ol>
+    </section>
+
+    <!-- BRIEF -->
+    <section class="panel" id="brief" role="tabpanel" hidden>
+      <div class="brief-frame" id="brief-frame">
+        <h3>Course performance workshop brief</h3>
+        <p class="note" id="brief-note">The brief is drafted after you've reviewed every finding. It will contain only the findings you accept or edit.</p>
+      </div>
+      <div class="approve-bar">
+        <p id="approve-text">Review all findings to unlock approval.</p>
+        <button class="btn" id="return-btn" type="button" disabled>Return for revision</button>
+        <button class="btn primary" id="approve-btn" type="button" disabled>Approve for workshop</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const findings = [
+  { id:"S1", title:"Teacher support satisfaction (Online)", value:"61% satisfied · 11 points below average, 5 below 2024 · n=380 · Mixed evidence",
+    aligned:[["FB003","I emailed my trainer three times about an assessment and waited over a week for a reply."],["FB007","Hard to get help when you study online at night. Questions in the forum sit there unanswered."],["FB011","Teachers seem stretched thin. Replies come eventually but usually after the due date has passed."],["FB015","It would be good to have a set time each week when a teacher is online to answer questions."]],
+    other:[["FB005","My online teacher always replied the same day and her feedback was really detailed."],["FB019","The Tuesday night drop-in sessions were a lifesaver."]] },
+  { id:"S2", title:"Assessment clarity satisfaction (Online)", value:"58% satisfied · 5 points below average · n=380 · Mixed evidence",
+    aligned:[["FB002","The assessment instructions didn't match what the marking guide asked for, so I had to resubmit."],["FB009","Not sure what 'demonstrate an understanding' means in task 2. Some examples would help."],["FB013","Too many assessments due in the same fortnight and the wording on some of them is confusing."]],
+    other:[["FB017","The assessment checklists made it clear exactly what I needed to submit."]] },
+  { id:"S3", title:"Unit withdrawal rate (CWSU204)", value:"34% withdrew · typical unit 12.5% · n=1,600 · No comment evidence", aligned:[], other:[] },
+  { id:"S4", title:"Withdrawal rate (Online)", value:"38% withdrew · up from 31% in 2024 · n=1,800 · Limited evidence",
+    aligned:[["FB024","I nearly dropped out when I started a new job. I would have liked to pause the course instead of withdrawing."]], other:[] },
+];
+const decisions = {};
+
+function commentList(list, side, fid) {
+  if (!list.length) return `<div class="none">None found</div>`;
+  return list.map(([cid, txt], i) => `
+    <label class="c"><input type="checkbox" data-f="${fid}" data-side="${side}" ${i < 2 ? "checked" : ""} aria-label="Show ${cid} as an excerpt">
+    <span>${txt}<span class="id">${cid}</span></span></label>`).join("");
+}
+function render() {
+  document.getElementById("findings").innerHTML = findings.map(f => {
+    const d = decisions[f.id];
+    const cls = d === "accept" || d === "edit" ? "accepted" : d === "reject" ? "rejected" : "";
+    const ev = (f.aligned.length || f.other.length) ? `
+      <div class="ev">
+        <div><h4>Consistent with this result (${f.aligned.length})</h4>${commentList(f.aligned,"a",f.id)}</div>
+        <div><h4 class="o">Pointing the other way (${f.other.length})</h4>${commentList(f.other,"o",f.id)}</div>
+      </div><div class="excerpt-hint">Ticked comments appear as excerpts in the brief (up to two per side). All linked comments stay in the evidence record.</div>`
+      : `<div class="none" style="margin-top:10px">No student comments relate to this result. The workshop may need other sources.</div>`;
+    return `<article class="finding ${cls}" id="f-${f.id}">
+      <div class="f-head"><h3>${f.id} · ${f.title}</h3></div>
+      <div class="f-head"><span class="v">${f.value}</span></div>
+      ${ev}
+      <div class="decide">
+        <span class="who">Your decision</span>
+        <button class="btn acc" data-f="${f.id}" data-d="accept" aria-pressed="${d==="accept"}">Accept</button>
+        <button class="btn ed" data-f="${f.id}" data-d="edit" aria-pressed="${d==="edit"}">Add a note</button>
+        <button class="btn rej" data-f="${f.id}" data-d="reject" aria-pressed="${d==="reject"}">Reject</button>
+      </div>
+      ${d==="edit"||d==="reject" ? `<label class="sr" for="n-${f.id}">Note</label><textarea id="n-${f.id}" placeholder="${d==="reject"?"Why are you rejecting this finding? (recorded in the audit log)":"Note for the workshop"}"></textarea>` : ""}
+    </article>`;
+  }).join("");
+  const n = Object.keys(decisions).length;
+  document.getElementById("review-progress").textContent = `${n} of 4 findings reviewed. Tick up to two comments per side to show as excerpts in the brief.`;
+  const all = n === 4;
+  const kept = findings.filter(f => decisions[f.id] && decisions[f.id] !== "reject");
+  document.getElementById("approve-btn").disabled = !all;
+  document.getElementById("return-btn").disabled = !all;
+  document.getElementById("approve-text").textContent = all ? `Draft ready: ${kept.length} of 4 findings included.` : "Review all findings to unlock approval.";
+  document.getElementById("waiting-text").textContent = all ? "The brief is drafted and needs your final approval." : `Review ${4-n} more finding${4-n===1?"":"s"} before the brief can be drafted.`;
+  document.getElementById("step-review").className = all ? "human done" : "now";
+  document.getElementById("step-brief").className = all ? "done" : "todo";
+  document.getElementById("step-final").className = all ? "now" : "todo";
+  document.getElementById("brief-note").innerHTML = all
+    ? `Included: ${kept.map(f=>f.id+" "+f.title).join("; ") || "none"}.<br>Open the full one-page brief (brief.html) from the run folder.`
+    : "The brief is drafted after you've reviewed every finding. It will contain only the findings you accept or edit.";
+}
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-tab]");
+  if (t) {
+    document.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-selected", b === t));
+    document.querySelectorAll(".panel").forEach(p => p.hidden = p.id !== t.dataset.tab);
+  }
+  const d = e.target.closest("[data-d]");
+  if (d) { decisions[d.dataset.f] = d.dataset.d; render(); }
+  if (e.target.id === "approve-btn" || e.target.id === "return-btn") {
+    const ok = e.target.id === "approve-btn";
+    document.getElementById("waiting").innerHTML = ok ? "<strong>Approved</strong>Approved by Farley. Nothing has been sent." : "<strong>Returned</strong>Returned for revision by Farley.";
+    document.getElementById("step-final").className = "human done";
+    document.getElementById("approve-btn").disabled = document.getElementById("return-btn").disabled = true;
+  }
+});
+document.addEventListener("change", e => {
+  if (e.target.matches("input[type=checkbox]")) {
+    const boxes = [...document.querySelectorAll(`input[data-f="${e.target.dataset.f}"][data-side="${e.target.dataset.side}"]:checked`)];
+    if (boxes.length > 2) e.target.checked = false;
+  }
+});
+render();
+</script>
+</body>
+</html>

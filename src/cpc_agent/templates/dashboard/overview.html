@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Overview — {{ state.get('course_code','') }}{% endblock %}
+{% block content %}
+<div class="tiles">
+  {% for r in records %}
+  <div class="tile">
+    <div class="lbl">{{ r.finding_id }} · {{ readable_label(r.measure, r.segment) }}</div>
+    <div class="val">{{ r.calculation }}</div>
+    <div class="cmp">{{ r.comparison_rule }}</div>
+    <div class="status">{{ r.evidence_status }}</div>
+  </div>
+  {% else %}
+  <p class="note">No signals were flagged for this run.</p>
+  {% endfor %}
+</div>
+<div class="cols">
+  <div>
+    <h2>What's been excluded or held back</h2>
+    <ul class="list">
+      {% for e in exceptions.get('exclusions', []) %}<li>{{ e.summary }}</li>{% endfor %}
+      {% for e in exceptions.get('quarantined', []) %}<li>{{ e.summary }}</li>{% endfor %}
+      {% for e in exceptions.get('limitations', []) %}<li>{{ e.summary }}</li>{% endfor %}
+      {% if not (exceptions.get('exclusions') or exceptions.get('quarantined') or exceptions.get('limitations')) %}
+      <li>None recorded.</li>
+      {% endif %}
+    </ul>
+  </div>
+  <div>
+    <h2>Your decisions so far</h2>
+    <ul class="list">
+      {% for t in trace if t.kind == 'human' %}
+      <li>{{ t.time }}: {{ t.what }}</li>
+      {% else %}
+      <li class="note">None yet.</li>
+      {% endfor %}
+    </ul>
+    <p class="note">Every decision is recorded with your name in the audit log.</p>
+  </div>
+</div>
+{% endblock %}

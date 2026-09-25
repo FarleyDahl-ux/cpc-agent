@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 where = ["src"]
 
 [tool.setuptools.package-data]
-cpc_agent = ["templates/*.css"]
+cpc_agent = ["templates/*.css", "templates/dashboard/*.html", "templates/dashboard/static/*.css"]
 
 [tool.pytest.ini_options]
 markers = ["integration: calls the real OpenAI API (requires .env); skipped by default"]

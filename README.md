@@ -18,7 +18,23 @@ pytest
 Unit tests are deterministic and never call the OpenAI API. Tests marked `@pytest.mark.integration` call the real API and are skipped by default; run them explicitly with `pytest -m integration` once `.env` is configured.
 
 ## Outputs
-Each run writes to `runs/<run_id>/`: `evidence_records.json`, `exception_log.json`, `audit_log.jsonl`, `brief.md`, and `brief.html` (a one-A4-page design brief, styled by `src/cpc_agent/templates/brief.css` — design source `docs/brief_mockup.html`, kept there only as a human-readable preview — filled entirely from that run's data, with system fonts only so it opens correctly offline). Everything in `runs/` is git-ignored — it is generated output, not source.
+Each run writes to `runs/<run_id>/`: `evidence_records.json`, `exception_log.json`, `audit_log.jsonl`, `brief.md`, `brief.html` (a one-A4-page design brief, styled by `src/cpc_agent/templates/brief.css` — design source `docs/brief_mockup.html`, kept there only as a human-readable preview — filled entirely from that run's data, with system fonts only so it opens correctly offline), `state.json` and `eligible_comments.json` (dashboard-only — see below). Everything in `runs/` is git-ignored — it is generated output, not source.
+
+## Review dashboard
+
+A local, single-user web dashboard for the human gates, built on `docs/dashboard_mockup.html`'s design:
+
+```
+python -m cpc_agent.run_dashboard
+```
+
+Open `http://127.0.0.1:5000` — the dashboard binds to `127.0.0.1` only and is never reachable from another machine. Use `--port` to change the port and `--debug` for Flask's reload/debug mode during development.
+
+"Start a new run" runs the pipeline synchronously (including the real investigation-stage LLM call, so it can take up to a minute or two) using a fixed, conservative default policy for the pre-review gates — scope always confirmed, any blank-value/reconciliation/low-sample pause always excluded, no further information for `ask_analyst` — then stops for your review. This dashboard is the *smallest end-to-end version*: it doesn't build UI for those earlier gates. If you want interactive control over them, use the CLI instead (`python -m cpc_agent.main`, no `--answers`) — both share the exact same validation/metrics/screening/investigation code (`main.prepare_run_for_review`), so nothing about the pipeline itself differs between them.
+
+From there the dashboard lets you: see each signal's value, comparison and evidence status (Overview); review each finding — choose up to two excerpt comments per side, add a note, accept/edit/reject (Review findings); see the run's real audit trail — tool names, search reasons/filters, result IDs and counts, never comment text (Agent activity); and preview the drafted brief and approve it or return it for revision (Brief and approval). Every human action is recorded in `audit_log.jsonl` with your name, a timestamp, the decision and any note, the same as the CLI's gates.
+
+Not a production job system: single-user, no auth, no job queue (a run blocks the request that started it), and `state.json`/`evidence_records.json` are read and written with no concurrent-write locking beyond what one dev-server process already gives you. See `docs/decisions.md` for what a production version would need that this deliberately doesn't build.
 
 ## What's implemented vs proposed
-See `docs/decisions.md` for the full design-decision log and `docs/test_results.md` for scoring against `tests/fixtures/answer_key.md` (deterministic pytest suite plus a real end-to-end run against the live OpenAI API). In short: the pipeline in `CLAUDE.md` (validation, metrics/flagging, comment screening, the LLM investigation loop, human gates, brief generation, audit log) is implemented and tested against `tests/fixtures/`. Live data connectors, pre-LLM ML-based redaction, and scheduled reruns are **proposed only** — not built.
+See `docs/decisions.md` for the full design-decision log and `docs/test_results.md` for scoring against `tests/fixtures/answer_key.md` (deterministic pytest suite plus real end-to-end runs against the live OpenAI API). In short: the pipeline in `CLAUDE.md` (validation, metrics/flagging, comment screening, the LLM investigation loop, human gates, brief generation, audit log) is implemented and tested against `tests/fixtures/`, and the review dashboard (`webapp.py`/`dashboard_state.py`) implements the smallest end-to-end version of the human gates over HTTP. Live data connectors, pre-LLM ML-based redaction, and scheduled reruns remain **proposed only** — not built. So does a production-grade version of the dashboard (background job queue instead of a blocking request, concurrent-write locking or a real datastore instead of plain JSON files, multi-user auth, UI for the pre-review gates the current dashboard auto-resolves).

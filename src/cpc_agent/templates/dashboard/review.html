@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Review findings — {{ state.get('course_code','') }}{% endblock %}
+{% block content %}
+<p class="progress-line">{{ reviewed }} of {{ total }} findings reviewed. Tick up to two comments per side to show as excerpts in the brief.</p>
+{% for r in records %}
+<article class="finding {{ 'accepted' if r.reviewer_status in ('accept', 'edit') else ('rejected' if r.reviewer_status == 'reject' else '') }}">
+  <div class="f-head"><h3>{{ r.finding_id }} · {{ readable_label(r.measure, r.segment) }}</h3></div>
+  <div class="f-head"><span class="v">{{ r.calculation }} · {{ r.comparison_rule }} · n={{ r.n|int }} · {{ r.evidence_status }}</span></div>
+  <form method="post" action="{{ url_for('submit_review', run_id=state.run_id, finding_id=r.finding_id) }}">
+    {% if r.aligned_ids or r.countervailing_ids %}
+    <div class="ev">
+      <div>
+        <h4>Consistent with this result ({{ r.aligned_ids|length }})</h4>
+        {% for cid in r.aligned_ids %}
+        {% set is_checked = cid in r.aligned_excerpt_ids if r.reviewer_status != 'Pending' else loop.index0 < 2 %}
+        <label class="c"><input type="checkbox" name="aligned_excerpt" value="{{ cid }}" {{ 'checked' if is_checked else '' }} data-side="aligned-{{ r.finding_id }}">
+          <span>{{ comments.get(cid, {}).get('text', '(comment text unavailable)') }}<span class="id">{{ cid }}</span></span></label>
+        {% else %}<div class="none">None found</div>{% endfor %}
+      </div>
+      <div>
+        <h4 class="o">Pointing the other way ({{ r.countervailing_ids|length }})</h4>
+        {% for cid in r.countervailing_ids %}
+        {% set is_checked = cid in r.countervailing_excerpt_ids if r.reviewer_status != 'Pending' else loop.index0 < 2 %}
+        <label class="c"><input type="checkbox" name="countervailing_excerpt" value="{{ cid }}" {{ 'checked' if is_checked else '' }} data-side="countervailing-{{ r.finding_id }}">
+          <span>{{ comments.get(cid, {}).get('text', '(comment text unavailable)') }}<span class="id">{{ cid }}</span></span></label>
+        {% else %}<div class="none">None found</div>{% endfor %}
+      </div>
+    </div>
+    <div class="excerpt-hint">Ticked comments appear as excerpts in the brief (up to two per side — the server enforces this even if more are ticked). All linked comments stay in the evidence record.</div>
+    {% else %}
+    <div class="none" style="margin-top:10px">No student comments relate to this result. The workshop may need other sources.</div>
+    {% endif %}
+    <div class="decide">
+      <span class="who">Your decision</span>
+      <button class="btn acc {{ 'current' if r.reviewer_status == 'accept' else '' }}" type="submit" name="decision" value="accept">Accept</button>
+      <button class="btn ed {{ 'current' if r.reviewer_status == 'edit' else '' }}" type="submit" name="decision" value="edit">Add a note</button>
+      <button class="btn rej {{ 'current' if r.reviewer_status == 'reject' else '' }}" type="submit" name="decision" value="reject">Reject</button>
+    </div>
+    <label for="note-{{ r.finding_id }}" class="note">Note (recorded in the audit log)</label>
+    <textarea id="note-{{ r.finding_id }}" name="note" placeholder="Note for the workshop">{{ r.reviewer_note }}</textarea>
+  </form>
+</article>
+{% else %}
+<p class="note">No findings to review for this run.</p>
+{% endfor %}
+<script>
+document.addEventListener("change", function (e) {
+  if (e.target.matches("input[type=checkbox]")) {
+    var side = e.target.dataset.side;
+    var boxes = document.querySelectorAll('input[data-side="' + side + '"]:checked');
+    if (boxes.length > 2) { e.target.checked = false; }
+  }
+});
+</script>
+{% endblock %}

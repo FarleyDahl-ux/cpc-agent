@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}CPC Preparation Agent — dashboard{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">CPC Preparation Agent<small>Prepares evidence. You decide.</small></div>
+    <a class="new-run" href="{{ url_for('new_run_form') }}">Start a new run</a>
+    <div>
+      <p class="side-h">Runs</p>
+      <ul class="runs">
+        {% for r in runs %}
+        <li><a href="{{ url_for('overview', run_id=r.run_id) }}" class="{{ 'current' if state and r.run_id == state.run_id else '' }}">
+          {{ r.get('course_code', 'Run') }} · {{ r.get('current_period', '') }}
+          <span class="rid">{{ r.get('created_at', '')[:16] }}</span>
+          {% if r.status == 'review_findings' %}<span class="chip you">Waiting for you</span>
+          {% elif r.status == 'brief_ready' %}<span class="chip you">Ready to approve</span>
+          {% elif r.status == 'approved' %}<span class="chip done">Approved</span>
+          {% elif r.status == 'returned' %}<span class="chip ret">Returned</span>
+          {% elif r.status == 'halted' %}<span class="chip ret">Halted</span>
+          {% elif r.status == 'aborted' %}<span class="chip ret">Aborted</span>
+          {% endif %}
+        </a></li>
+        {% else %}
+        <li class="note">No runs yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% if steps %}
+    <div>
+      <p class="side-h">Progress</p>
+      <ol class="steps">
+        {% for step in steps %}
+        <li class="{{ step.cls }}"><span class="dot"></span>{{ step.label }}</li>
+        {% endfor %}
+      </ol>
+    </div>
+    {% endif %}
+    <div class="key"><span class="a">Agent</span><span class="h">You</span></div>
+  </aside>
+  <main>
+    {% if state %}
+    <div class="top">
+      <div>
+        <h1>{{ state.get('course_code', '') }} {{ state.get('course_title', '') }}</h1>
+        <div class="sub">{{ state.get('current_period', '') }} compared with {{ state.get('previous_period', '') }} · Analyst: {{ state.get('analyst_name', '') }} · Run {{ state.run_id }}</div>
+      </div>
+      {% if waiting_title %}
+      <div class="waiting"><strong>{{ waiting_title }}</strong>{{ waiting_text }}</div>
+      {% endif %}
+    </div>
+    <nav class="tabs">
+      <a href="{{ url_for('overview', run_id=state.run_id) }}" class="{{ 'active' if active_tab=='overview' else '' }}">Overview</a>
+      <a href="{{ url_for('review', run_id=state.run_id) }}" class="{{ 'active' if active_tab=='review' else '' }}">Review findings</a>
+      <a href="{{ url_for('activity', run_id=state.run_id) }}" class="{{ 'active' if active_tab=='activity' else '' }}">Agent activity</a>
+      <a href="{{ url_for('brief', run_id=state.run_id) }}" class="{{ 'active' if active_tab=='brief' else '' }}">Brief and approval</a>
+    </nav>
+    {% endif %}
+    {% if error_message %}
+    <div class="error-box">{{ error_message }}</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+</body>
+</html>

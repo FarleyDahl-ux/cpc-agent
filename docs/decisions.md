@@ -563,3 +563,140 @@ chosen and recorded here.
   adopt multi-synonym searches (6–9 keywords per call, 11 total searches
   instead of 18–24) and recall improved accordingly — see
   `docs/test_results.md`.
+
+## Part B — review dashboard
+
+- **`main.py` was refactored to extract `prepare_run_for_review`, shared by
+  the CLI and the dashboard, rather than building the dashboard's
+  orchestration as a separate, parallel implementation.** Everything up to
+  (not including) the findings review gate — validation, metrics/flagging,
+  screening, investigation, evidence record construction — is one code
+  path now; `run_pipeline` (CLI) calls it and continues straight through
+  review/brief/approval synchronously, while the dashboard
+  (`dashboard_state.start_run`) calls the exact same function and then
+  drives review/brief/approval across separate HTTP requests instead. The
+  refactor is behaviour-preserving by construction (the full pre-existing
+  test suite, unchanged, passed against it) and means there is exactly one
+  implementation of validation/metrics/screening/investigation to keep
+  correct — not two that could drift apart.
+- **`AuditLog` is reopened per phase, never held open across the
+  CLI/dashboard boundary.** `prepare_run_for_review` always closes its
+  `AuditLog` before returning (ready, halted or aborted); `run_pipeline`
+  opens a fresh one for the review/brief/approval phase and re-points the
+  `Gates` instance's `.audit` reference at it. This is exactly the shape
+  the dashboard needs anyway — a new Python process (a new HTTP request)
+  can't hold a Python object alive from an earlier request, so every
+  dashboard route opens, appends to, and closes its own `AuditLog` bound
+  to the same `run_id`/file path. JSONL append-mode makes this safe:
+  there's no in-memory state to lose between reopens.
+- **`Gates.__init__` gained an `answers: dict | None` parameter**,
+  alongside the existing `answers_path` (a JSON file, the CLI's
+  `--answers`). The dashboard needs to drive the exact same scripted-mode
+  code path with an in-memory policy dict, not a file it would have to
+  write to a temp path for no reason — `answers_path` still wins if both
+  are given, and every existing scripted-mode behaviour is unchanged.
+- **The dashboard auto-resolves every pre-review gate (scope, blank-value,
+  reconciliation, low-sample, ask_analyst) with a fixed, conservative
+  default policy** (`dashboard_state.start_run`'s `answers` dict: always
+  confirm scope, always exclude on a blank/reconciliation/low-sample
+  pause, a fixed generic answer for `ask_analyst`) rather than building UI
+  for each of them. The brief explicitly asked for "the smallest
+  end-to-end version" and named exactly four things the UI must cover
+  (list runs/stage/gate status, review findings, preview the brief,
+  return/approve) — none of which are the earlier data-quality gates. An
+  analyst who wants interactive control over those specific pauses still
+  has the CLI, which shares the same underlying pipeline. Documented here
+  rather than silently narrowing scope, since it's a real, visible
+  difference from the CLI's default behaviour (interactive prompts).
+- **`state.json`'s status values are a small closed set**
+  (`review_findings`, `brief_ready`, `approved`, `returned`, `halted`,
+  `aborted`) that double as the state machine every write path checks
+  against, rather than freeform strings. `apply_finding_review` only
+  writes when `status == "review_findings"`; `finalize_run` only writes
+  when `status == "brief_ready"` and every finding has been reviewed
+  (checked again server-side, not trusted from `pending_gate` alone) —
+  this is what makes "invalid state transition" a real, enforced concept
+  rather than just a UI affordance (buttons the template happens to grey
+  out), and it's exactly what the tests for that requirement exercise.
+- **"Findings reviewed" is computed on every read from
+  `evidence_records.json`'s `reviewer_status` field
+  (`dashboard_state.review_progress`), never tracked as a separate
+  incrementing counter.** A separate counter would have to be very
+  carefully not incremented twice on a resubmitted review — computing it
+  fresh from the actual record state makes "duplicate submission" trivially
+  correct by construction: resubmitting `S1` changes what `S1`'s record
+  says, not how many records have *ever* been submitted, so the count
+  can't drift.
+- **A web-submitted excerpt selection is always recorded as `"analyst
+  selection"`, never `"automatic selection (first two by ID)"`** — a
+  deliberate difference from the CLI/scripted-answers-file semantics
+  (where an *absent* key or a blank interactive answer means "no choice
+  was made"). An HTML form always submits *some* list of checked boxes
+  (possibly empty), so there's no way to distinguish "the analyst didn't
+  look" from "the analyst looked and left the pre-ticked default" —  and
+  the dashboard's review page always shows the excerpt checkboxes before
+  a decision can be submitted, so the analyst genuinely has seen them
+  either way. `review.html` still pre-ticks the first two by position for
+  an unreviewed finding (matching the established default policy and the
+  mockup's own UX), but once a finding has actually been reviewed, the
+  checkboxes reflect what was *saved*, not the positional default, so
+  revisiting a reviewed finding doesn't misrepresent a past explicit
+  choice as the default again.
+- **`eligible_comments.json` is a new run artifact, dashboard-only, not
+  part of CLAUDE.md §7's four (five, since brief.html) outputs.** It's
+  written unconditionally by `prepare_run_for_review` (a run started from
+  the CLI gets one too, just unused) rather than only when a dashboard run
+  starts, so there's one code path that produces it. It holds every
+  *eligible* comment's text keyed by ID, sourced from
+  `screening_result.eligible` — the same set `comments_by_id` is built
+  from everywhere else in the pipeline — so a quarantined comment has no
+  route into this file, and therefore no route to the browser; this is
+  structural (there is no filter to bypass), not a runtime check that
+  could be forgotten on a new code path.
+- **The brief preview is served from its own route
+  (`GET /runs/<id>/brief.html`) and embedded via `<iframe src=...>`**,
+  rather than reading the file and inlining its markup into the
+  dashboard's own Jinja template. `brief.html` carries its own `<style>`
+  block (from `brief.css`) designed to stand alone on an A4 page; inlining
+  it would mean either escaping/neutralising that CSS or letting it leak
+  into and collide with the dashboard's own stylesheet. Serving it as its
+  own document keeps both stylesheets scoped to their own page, and it's
+  also literally the same `brief.html` a CLI-only user would open directly
+  from `runs/<run_id>/` — the dashboard doesn't render a second, different
+  version of the brief.
+- **The Agent Activity tab is built by one function
+  (`dashboard_state.build_activity_trace`) that maps *only* real
+  `audit_log.jsonl` events to display entries — there is no fallback,
+  placeholder, or illustrative content anywhere in the code path.** A run
+  with zero events (or a halted run) just renders an empty trace with "No
+  activity recorded yet.", never the mockup's static example timeline.
+  Every `tool_call` event's `args`/`result` were already sanitised to
+  IDs/counts only before being logged (`investigate._sanitize_result_for_log`,
+  an earlier round); the trace builder additionally only ever surfaces
+  `reason`/`theme`/`note`/`question` fields (short, human- or
+  model-authored strings, never comment text) from those events — `record_link`'s
+  `rationale` argument is deliberately left out of the trace even though it
+  isn't raw comment text either, since a rationale can closely paraphrase or
+  quote a comment and the brief's requirement is unambiguous ("never comment
+  text").
+- **`run_dashboard.py` binds to `127.0.0.1` explicitly** (never
+  `0.0.0.0` or a configurable host) and generates a fresh random
+  `SECRET_KEY` per process rather than reading one from `.env` — this
+  dashboard has no session data or CSRF-protected state worth signing
+  server-side, and a prototype single-user localhost tool has no need to
+  persist a key across restarts. `create_app()` takes `client`/`model`
+  parameters so tests (and any future embedding) can inject a fake LLM
+  client the same way `run_pipeline`/`run_investigation` already do —
+  production wiring (`python -m cpc_agent.run_dashboard`) always leaves
+  them `None`, falling back to the real, lazily-constructed client.
+- **What a production version would need, and doesn't have here**
+  (documented per the brief's own "treat as a prototype" framing, not
+  built): a background job queue instead of a blocking HTTP request for
+  "start a new run" (today a slow investigation stage ties up the
+  requesting connection for its whole duration); real concurrent-write
+  safety for `state.json`/`evidence_records.json` (today two simultaneous
+  requests against the same run could race — acceptable for one analyst
+  using one browser tab, not for anything multi-user); authentication (the
+  dashboard trusts whatever name is typed into "Your name" — fine for a
+  localhost-only single-user tool, not otherwise); and UI for the
+  pre-review gates it currently auto-resolves.

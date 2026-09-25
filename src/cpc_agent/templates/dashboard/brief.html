@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Brief and approval — {{ state.get('course_code','') }}{% endblock %}
+{% block content %}
+{% if brief_ready %}
+<div class="brief-frame">
+  <h3>Course performance workshop brief</h3>
+  <p class="note">Preview below — also written to <code>runs/{{ state.run_id }}/brief.md</code> and <code>brief.html</code>. Nothing here has been sent, emailed or published.</p>
+  <iframe src="{{ url_for('brief_file', run_id=state.run_id) }}" title="Brief preview" style="width:100%;height:70vh;border:1px solid var(--rule);border-radius:10px;margin-top:10px;"></iframe>
+</div>
+<div class="approve-bar">
+  {% if state.status in ('approved', 'returned') %}
+  <p>{{ 'Approved' if state.status == 'approved' else 'Returned for revision' }} by {{ state.analyst_name }}. Nothing has been sent.</p>
+  {% else %}
+  <p>Draft ready: {{ accepted_count }} of {{ total }} findings included.</p>
+  <form method="post" action="{{ url_for('return_run', run_id=state.run_id) }}" style="display:inline;">
+    <button class="btn" type="submit">Return for revision</button>
+  </form>
+  <form method="post" action="{{ url_for('approve_run', run_id=state.run_id) }}" style="display:inline;">
+    <button class="btn primary" type="submit">Approve for workshop</button>
+  </form>
+  {% endif %}
+</div>
+{% else %}
+<div class="brief-frame">
+  <h3>Course performance workshop brief</h3>
+  <p class="note">The brief is drafted after you've reviewed every finding ({{ reviewed }} of {{ total }} done). It will contain only the findings you accept or edit.</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Start a new run — CPC Preparation Agent{% endblock %}
+{% block content %}
+<h2>Start a new run</h2>
+<p class="note">Runs the pipeline on the data in <code>data/</code> for CWS30125, then stops for your review once evidence has been gathered. This can take up to a minute or two (it calls the investigation stage's language model).</p>
+<form method="post" action="{{ url_for('create_run') }}" style="max-width:420px;">
+  <p>
+    <label for="analyst_name">Your name (recorded in the audit log and the brief)</label><br>
+    <input type="text" id="analyst_name" name="analyst_name" required style="width:100%;margin-top:6px;">
+  </p>
+  <button class="btn primary" type="submit">Start run</button>
+</form>
+{% endblock %}

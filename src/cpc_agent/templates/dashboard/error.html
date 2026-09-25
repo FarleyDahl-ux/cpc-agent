@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Error — CPC Preparation Agent{% endblock %}
+{% block content %}
+<h2>Not allowed</h2>
+<div class="error-box">{{ message }}</div>
+{% if state %}<p><a href="{{ url_for('overview', run_id=state.run_id) }}">Back to the run</a></p>{% endif %}
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Agent activity — {{ state.get('course_code','') }}{% endblock %}
+{% block content %}
+<p class="real-note">This is the run's real audit trail (tool names, search reasons/filters, result IDs and counts) — never comment text, and never illustrative example activity.</p>
+<ol class="trace">
+  {% for t in trace %}
+  <li class="{{ t.kind }}">
+    <div class="t-time">{{ t.time }}</div>
+    <div class="t-what">{{ t.what }}</div>
+    {% if t.why %}<div class="t-why">{{ t.why }}</div>{% endif %}
+    {% if t.res %}<div class="t-res">{{ t.res }}</div>{% endif %}
+  </li>
+  {% else %}
+  <li class="sys"><div class="t-what">No activity recorded yet.</div></li>
+  {% endfor %}
+</ol>
+{% endblock %}

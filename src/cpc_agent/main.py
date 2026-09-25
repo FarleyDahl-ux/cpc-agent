@@ -6,25 +6,37 @@ scope gate -> validate -> calculate/flag -> screen comments -> investigate
 gate. HALT stops the run immediately; PAUSE asks the analyst (interactively
 or via the scripted answers file) and records the decision; LIMITATION is
 recorded and the run continues.
+
+`prepare_run_for_review` holds everything up to (but not including) the
+findings review gate — validation, metrics/flagging, screening,
+investigation, evidence records. `run_pipeline` (the CLI) calls it and then
+continues straight through review, brief and final approval in one
+synchronous run. The web dashboard (dashboard_state.py) calls the same
+`prepare_run_for_review` to start a run, then drives review/brief/approval
+across separate HTTP requests instead — both paths share every pipeline
+stage up to that point, so there is exactly one implementation of
+validation/metrics/screening/investigation to keep correct and tested.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import audit, config
 from .brief import populate_cpc_template, render_brief_html, update_brief_status
-from .evidence import build_evidence_record
+from .evidence import EvidenceRecord, build_evidence_record
 from .gates import Gates
 from .investigate import run_investigation
 from .loaders import load_approved_sources
-from .metrics import calculate_metrics, flag_signals
-from .screening import quarantine_summary, screen_comments
+from .metrics import Signal, calculate_metrics, flag_signals
+from .screening import EligibleComment, quarantine_summary, screen_comments
 from .validation import (
     HaltError,
+    ScopeContext,
     blank_value_summary,
     check_reporting_context,
     check_satisfaction_sample_size,
@@ -57,29 +69,60 @@ def _filter_excluded(rows: list[dict], filename: str, excluded: set[tuple]) -> l
     return [row for row in rows if tuple(segment_of(filename, row).values()) not in excluded]
 
 
-def run_pipeline(
+@dataclass
+class ReviewReadyRun:
+    """Everything the findings-review stage onward needs. `status` is
+    "ready" (proceed to review), "aborted" (analyst declined at the scope
+    gate) or "halted" (HaltError, or the analyst aborted on a PAUSE) — in
+    both non-"ready" cases `message` explains why and the audit log has
+    already recorded and closed the event."""
+
+    run_id: str
+    runs_dir: Path
+    status: str
+    message: str = ""
+    gates: Gates | None = None
+    context: ScopeContext | None = None
+    signals: list[Signal] = field(default_factory=list)
+    evidence_records: list[EvidenceRecord] = field(default_factory=list)
+    exceptions: dict = field(default_factory=dict)
+    comments_by_id: dict[str, EligibleComment] = field(default_factory=dict)
+    data_version: str = ""
+    snapshot_date: str = "n/a"
+
+    @property
+    def run_dir(self) -> Path:
+        return self.runs_dir / self.run_id
+
+
+def prepare_run_for_review(
     answers_path: str | None = None,
+    answers: dict | None = None,
     data_dir: Path = config.DATA_DIR,
     runs_dir: Path = config.RUNS_DIR,
     client=None,
     model: str | None = None,
-) -> int:
-    run_id = audit.new_run_id()
+    run_id: str | None = None,
+) -> ReviewReadyRun:
+    run_id = run_id or audit.new_run_id()
     log = audit.AuditLog(run_id, runs_dir=runs_dir)
-    log.log_event("run_start", instruction_version=config.INSTRUCTION_VERSION, scripted=answers_path is not None)
+    log.log_event(
+        "run_start",
+        instruction_version=config.INSTRUCTION_VERSION,
+        scripted=answers_path is not None or answers is not None,
+    )
 
     sources = load_approved_sources(data_dir)
     log.log_event("input_files", hashes=audit.input_file_hashes(sources))
     data_version = audit.compute_data_version(sources)
 
-    gates = Gates(answers_path, audit=log)
+    gates = Gates(answers_path, audit=log, answers=answers)
 
     context = check_reporting_context(sources)
     if not gates.confirm_scope(context):
         log.log_event("run_end", status="aborted_at_scope_gate")
         log.close()
-        print("Run aborted at the scope gate.")
-        return 1
+        return ReviewReadyRun(run_id=run_id, runs_dir=runs_dir, status="aborted", message="Run aborted at the scope gate.")
 
     try:
         validate_schema(sources)
@@ -87,8 +130,7 @@ def run_pipeline(
         log.log_event("halt", reason=str(exc))
         log.log_event("run_end", status="halted")
         log.close()
-        print(f"HALT: {exc}")
-        return 1
+        return ReviewReadyRun(run_id=run_id, runs_dir=runs_dir, status="halted", message=f"HALT: {exc}")
 
     exceptions: dict[str, list[dict]] = {"pauses": [], "exclusions": [], "quarantined": [], "limitations": []}
 
@@ -120,8 +162,10 @@ def run_pipeline(
             log.log_event("halt", reason=f"Analyst aborted on blank value: {issue.issue_key}")
             log.log_event("run_end", status="halted")
             log.close()
-            print(f"HALT: analyst aborted on blank value for {issue.issue_key}")
-            return 1
+            return ReviewReadyRun(
+                run_id=run_id, runs_dir=runs_dir, status="halted",
+                message=f"HALT: analyst aborted on blank value for {issue.issue_key}",
+            )
         excluded[issue.file].add(tuple(issue.segment.values()))
         _record_exclusion(issue.issue_key, issue.segment, issue.file, f"blank '{issue.field}'", blank_value_summary(issue))
 
@@ -131,8 +175,10 @@ def run_pipeline(
             log.log_event("halt", reason=f"Analyst aborted on reconciliation mismatch: {issue.issue_key}")
             log.log_event("run_end", status="halted")
             log.close()
-            print(f"HALT: analyst aborted on reconciliation mismatch for {issue.issue_key}")
-            return 1
+            return ReviewReadyRun(
+                run_id=run_id, runs_dir=runs_dir, status="halted",
+                message=f"HALT: analyst aborted on reconciliation mismatch for {issue.issue_key}",
+            )
         excluded["course_metrics.csv"].add(tuple(issue.segment.values()))
         _record_exclusion(issue.issue_key, issue.segment, "course_metrics.csv", "failed reconciliation", reconciliation_summary(issue))
 
@@ -206,23 +252,75 @@ def run_pipeline(
         log.log_event("evidence_status", finding_id=signal.id, status=record.evidence_status)
 
     comments_by_id = {c.comment_id: c for c in screening_result.eligible}
-    reviewed = gates.review_findings(evidence_records, comments_by_id)
-    accepted = [r for r in reviewed if r.reviewer_status in ("accept", "edit")]
 
-    generated_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     snapshot_date = next(
         (row["snapshot_date"] for row in sources.get("course_metrics").rows if row.get("reporting_period") == config.CURRENT_PERIOD),
         "n/a",
     )
+
+    # A snapshot of everything gathered so far, so a caller that only reads
+    # files (the dashboard, across separate HTTP requests) has something to
+    # show immediately. The CLI overwrites evidence_records.json/
+    # exception_log.json again once review/approval finish.
+    (log.run_dir / "evidence_records.json").write_text(
+        json.dumps([r.to_dict() for r in evidence_records], indent=2), encoding="utf-8"
+    )
+    (log.run_dir / "exception_log.json").write_text(json.dumps(exceptions, indent=2), encoding="utf-8")
+    (log.run_dir / "eligible_comments.json").write_text(
+        json.dumps(
+            {
+                cid: {"mode": c.delivery_mode, "region": c.delivery_region, "prompt": c.prompt, "text": c.text}
+                for cid, c in comments_by_id.items()
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    log.close()
+    return ReviewReadyRun(
+        run_id=run_id,
+        runs_dir=runs_dir,
+        status="ready",
+        gates=gates,
+        context=context,
+        signals=signals,
+        evidence_records=evidence_records,
+        exceptions=exceptions,
+        comments_by_id=comments_by_id,
+        data_version=data_version,
+        snapshot_date=snapshot_date,
+    )
+
+
+def run_pipeline(
+    answers_path: str | None = None,
+    data_dir: Path = config.DATA_DIR,
+    runs_dir: Path = config.RUNS_DIR,
+    client=None,
+    model: str | None = None,
+) -> int:
+    prep = prepare_run_for_review(answers_path=answers_path, data_dir=data_dir, runs_dir=runs_dir, client=client, model=model)
+    if prep.status != "ready":
+        print(prep.message)
+        return 1
+
+    log = audit.AuditLog(prep.run_id, runs_dir=runs_dir)
+    gates = prep.gates
+    gates.audit = log  # prep's AuditLog was closed after prepare_run_for_review; point at the reopened one
+    reviewed = gates.review_findings(prep.evidence_records, prep.comments_by_id)
+    accepted = [r for r in reviewed if r.reviewer_status in ("accept", "edit")]
+
+    generated_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     brief_path = populate_cpc_template(
         accepted,
-        context,
-        run_id,
-        data_version,
+        prep.context,
+        prep.run_id,
+        prep.data_version,
         config.INSTRUCTION_VERSION,
         generated_date,
-        snapshot_date,
-        exceptions,
+        prep.snapshot_date,
+        prep.exceptions,
         log.run_dir,
         analyst_name=gates.analyst_name,
     )
@@ -233,15 +331,15 @@ def run_pipeline(
 
     html_path = render_brief_html(
         accepted,
-        context,
-        run_id,
-        data_version,
+        prep.context,
+        prep.run_id,
+        prep.data_version,
         generated_date,
-        snapshot_date,
-        exceptions,
+        prep.snapshot_date,
+        prep.exceptions,
         gates.analyst_name,
         decision,
-        comments_by_id,
+        prep.comments_by_id,
         log.run_dir,
     )
     log.log_event("brief_html_written", path=str(html_path))
@@ -249,12 +347,12 @@ def run_pipeline(
     (log.run_dir / "evidence_records.json").write_text(
         json.dumps([r.to_dict() for r in reviewed], indent=2), encoding="utf-8"
     )
-    (log.run_dir / "exception_log.json").write_text(json.dumps(exceptions, indent=2), encoding="utf-8")
+    (log.run_dir / "exception_log.json").write_text(json.dumps(prep.exceptions, indent=2), encoding="utf-8")
 
     log.log_event("run_end", status="completed", final_decision=decision)
     log.close()
 
-    print(f"Run {run_id} complete. Outputs written to {log.run_dir}")
+    print(f"Run {prep.run_id} complete. Outputs written to {log.run_dir}")
     print(f"Final decision: {decision}. The brief is not sent, emailed or published.")
     return 0
 
