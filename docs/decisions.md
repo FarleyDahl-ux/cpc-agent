@@ -529,3 +529,37 @@ chosen and recorded here.
   that `answer_key.md`'s own commentary flags as boundary. Recorded
   transparently rather than adjusted away, per the brief's explicit
   instruction not to edit the answer key to match results.
+
+## Part A — multi-keyword search
+
+- **The dedup key hashes the keyword *set*, not the keyword *list*.**
+  `tuple(sorted({k.lower() for k in clean_keywords}))` treats `["Reply",
+  "help"]` and `["HELP", "reply"]` as the same search, since they'd return
+  the exact same results — a model retrying with reordered/recapitalised
+  keywords isn't a new search, it's the same one again, and should be
+  rejected as a repeat just like the single-keyword version already
+  rejected exact repeats.
+- **A bare string is tolerated in place of a list**
+  (`if isinstance(keywords, str): keywords = [keywords]`), rather than
+  rejected as a type error. Real models occasionally emit a scalar where a
+  schema says array, especially right after a contract change; silently
+  normalising a single string into a one-item list costs nothing and
+  avoids a spurious rejected call for a call that was otherwise
+  perfectly reasonable.
+- **Blank entries in the keywords list are dropped, not rejected.** A
+  list like `["assessment", "", "  "]` is treated as `["assessment"]`
+  rather than raising — the empty strings are noise, not malformed input,
+  and rejecting the whole call over them would waste one of the model's
+  limited search attempts for no reason. The "at least one filter"
+  requirement is checked *after* this cleanup, so `keywords=["", "  "]`
+  alone (no real keyword, no mode/region) is still correctly rejected.
+- **The system prompt now gives a worked multi-synonym example** rather
+  than just describing the parameter, because the previous round's live
+  comparison (`docs/test_results.md`) showed real recall loss traced
+  directly to single-keyword guessing under the budget — telling the
+  model "keywords is a list" without also showing what good usage looks
+  like risked it continuing to search one word at a time out of habit.
+  The real 5-run comparison after this change confirms the model did
+  adopt multi-synonym searches (6–9 keywords per call, 11 total searches
+  instead of 18–24) and recall improved accordingly — see
+  `docs/test_results.md`.

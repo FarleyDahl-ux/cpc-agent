@@ -57,8 +57,8 @@ class _FakeResponse:
 _DEFAULT_SCRIPT = [
     ("get_comment_corpus_profile", {}),
     ("list_signals", {}),
-    ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "looking for support complaints", "keyword": "reply"}),
-    ("search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "looking for support praise", "keyword": "detailed"}),
+    ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "looking for support complaints", "keywords": ["reply"]}),
+    ("search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "looking for support praise", "keywords": ["detailed"]}),
     *[
         ("record_link", {"signal_id": "S1", "comment_id": cid, "relation": "aligned", "theme": "Teacher responsiveness and support", "rationale": "reports a support gap"})
         for cid in ("FB003", "FB007", "FB011", "FB015")
@@ -67,18 +67,18 @@ _DEFAULT_SCRIPT = [
         ("record_link", {"signal_id": "S1", "comment_id": cid, "relation": "countervailing", "theme": "Teacher responsiveness and support", "rationale": "reports responsive teaching"})
         for cid in ("FB005", "FB019")
     ],
-    ("search_comments", {"signal_id": "S2", "direction": "aligned", "reason": "looking for clarity complaints", "keyword": "assessment"}),
-    ("search_comments", {"signal_id": "S2", "direction": "countervailing", "reason": "looking for clarity praise", "keyword": "checklist"}),
+    ("search_comments", {"signal_id": "S2", "direction": "aligned", "reason": "looking for clarity complaints", "keywords": ["assessment"]}),
+    ("search_comments", {"signal_id": "S2", "direction": "countervailing", "reason": "looking for clarity praise", "keywords": ["checklist"]}),
     *[
         ("record_link", {"signal_id": "S2", "comment_id": cid, "relation": "aligned", "theme": "Assessment clarity", "rationale": "reports unclear assessment wording"})
         for cid in ("FB002", "FB009", "FB013")
     ],
     ("record_link", {"signal_id": "S2", "comment_id": "FB017", "relation": "countervailing", "theme": "Assessment clarity", "rationale": "reports clear checklists"}),
-    ("search_comments", {"signal_id": "S3", "direction": "aligned", "reason": "looking for unit-specific complaints", "keyword": "legal"}),
-    ("search_comments", {"signal_id": "S3", "direction": "countervailing", "reason": "looking for unit-specific praise", "keyword": "ethical"}),
+    ("search_comments", {"signal_id": "S3", "direction": "aligned", "reason": "looking for unit-specific complaints", "keywords": ["legal"]}),
+    ("search_comments", {"signal_id": "S3", "direction": "countervailing", "reason": "looking for unit-specific praise", "keywords": ["ethical"]}),
     ("note_no_evidence", {"signal_id": "S3", "reason": "No eligible comments could be linked to this unit."}),
-    ("search_comments", {"signal_id": "S4", "direction": "aligned", "reason": "looking for withdrawal-related comments", "keyword": "withdraw"}),
-    ("search_comments", {"signal_id": "S4", "direction": "countervailing", "reason": "looking for continuation comments", "keyword": "flexib"}),
+    ("search_comments", {"signal_id": "S4", "direction": "aligned", "reason": "looking for withdrawal-related comments", "keywords": ["withdraw"]}),
+    ("search_comments", {"signal_id": "S4", "direction": "countervailing", "reason": "looking for continuation comments", "keywords": ["flexib"]}),
     ("record_link", {"signal_id": "S4", "comment_id": "FB024", "relation": "aligned", "theme": "Flexibility and course pacing", "rationale": "reports nearly withdrawing"}),
     ("finish_investigation", {}),
 ]
@@ -237,20 +237,20 @@ def test_end_to_end_run_records_search_budget_exhaustion_as_a_limitation(tmp_pat
     script = [
         ("get_comment_corpus_profile", {}),
         ("list_signals", {}),
-        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r1", "keyword": "reply"}),
-        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r2", "keyword": "help"}),
-        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r3", "keyword": "wait"}),
-        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r4 over budget", "keyword": "teacher"}),
-        ("search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "r5", "keyword": "detailed"}),
+        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r1", "keywords": ["reply"]}),
+        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r2", "keywords": ["help"]}),
+        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r3", "keywords": ["wait"]}),
+        ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r4 over budget", "keywords": ["teacher"]}),
+        ("search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "r5", "keywords": ["detailed"]}),
         ("record_link", {"signal_id": "S1", "comment_id": "FB003", "relation": "aligned", "theme": "Teacher responsiveness and support", "rationale": "reports a support gap"}),
-        ("search_comments", {"signal_id": "S2", "direction": "aligned", "reason": "r", "keyword": "assessment"}),
-        ("search_comments", {"signal_id": "S2", "direction": "countervailing", "reason": "r", "keyword": "checklist"}),
+        ("search_comments", {"signal_id": "S2", "direction": "aligned", "reason": "r", "keywords": ["assessment"]}),
+        ("search_comments", {"signal_id": "S2", "direction": "countervailing", "reason": "r", "keywords": ["checklist"]}),
         ("note_no_evidence", {"signal_id": "S2", "reason": "nothing conclusive"}),
-        ("search_comments", {"signal_id": "S3", "direction": "aligned", "reason": "r", "keyword": "legal"}),
-        ("search_comments", {"signal_id": "S3", "direction": "countervailing", "reason": "r", "keyword": "ethical"}),
+        ("search_comments", {"signal_id": "S3", "direction": "aligned", "reason": "r", "keywords": ["legal"]}),
+        ("search_comments", {"signal_id": "S3", "direction": "countervailing", "reason": "r", "keywords": ["ethical"]}),
         ("note_no_evidence", {"signal_id": "S3", "reason": "nothing conclusive"}),
-        ("search_comments", {"signal_id": "S4", "direction": "aligned", "reason": "r", "keyword": "withdraw"}),
-        ("search_comments", {"signal_id": "S4", "direction": "countervailing", "reason": "r", "keyword": "flexib"}),
+        ("search_comments", {"signal_id": "S4", "direction": "aligned", "reason": "r", "keywords": ["withdraw"]}),
+        ("search_comments", {"signal_id": "S4", "direction": "countervailing", "reason": "r", "keywords": ["flexib"]}),
         ("note_no_evidence", {"signal_id": "S4", "reason": "nothing conclusive"}),
         ("finish_investigation", {}),
     ]

@@ -267,6 +267,70 @@ event and `search_log`), not fixture drift:
 `tests/fixtures/expected_results.json` and `answer_key.md` were not edited
 to match these results.
 
+## Part A: multi-keyword search
+
+`search_comments`'s `keyword: str` parameter became `keywords: list[str]`
+(match-any, case-insensitive), keeping every existing rule unchanged: at
+least one filter still required (now `delivery_mode`/`delivery_region`/
+`keywords`), the 5-result cap, the 3-per-direction/24-per-run search
+budget, the required `reason`, and no identical repeats — the dedup key
+now treats the keyword *set* as order- and case-independent, so
+`["Reply", "help"]` and `["HELP", "reply"]` are the same search. The system
+prompt was updated to explicitly encourage packing several synonyms into
+one search (with a worked example) rather than one keyword per call, since
+a tight search budget makes each call's coverage matter more than before.
+9 new tests in `tests/test_investigate.py` cover OR-matching across
+several keywords, case-insensitivity, blank/duplicate-entry handling, a
+bare string tolerated in place of a list, rejection when only blank
+keywords are given with no other filter, and order/case-independent
+dedup. All 139 default tests pass (3 real-API tests deselected); all 3
+integration tests re-ran and pass against the live API with the new
+parameter.
+
+### Real 5-run live comparison after multi-keyword search
+
+`python scripts/live_comparison.py --runs 5`, real API:
+
+```
+S1 (teacher_support, Online): found 5/5; evidence_status == answer key 5/5; aligned_ids exact match 3/5 (expected aligned IDs fully recovered 3/5); countervailing_ids exact match 1/5
+S2 (assessment_clarity, Online): found 5/5; evidence_status == answer key 5/5; aligned_ids exact match 5/5 (expected aligned IDs fully recovered 5/5); countervailing_ids exact match 5/5
+S3 (unit_withdrawal_rate, CWSU204): found 5/5; evidence_status == answer key 5/5; aligned_ids exact match 5/5 (expected aligned IDs fully recovered 5/5); countervailing_ids exact match 5/5
+S4 (segment_withdrawal_rate, Online): found 5/5; evidence_status == answer key 1/5; aligned_ids exact match 1/5 (expected aligned IDs fully recovered 1/5); countervailing_ids exact match 3/5
+```
+
+This is a clear recovery from the single-keyword round immediately before
+it: `evidence_status` now matches the answer key **5/5 for S1, S2 and S3**
+(S1 had dropped to 2/5 under single-keyword search), and S1's aligned/
+countervailing recall improved too (aligned exact match 1/5 → 3/5,
+countervailing 0/5 → 1/5; FB005 — previously found in 0 of the 5 runs —
+was now found in all 5). A one-off manual run's `search_log` shows why:
+the model now searches with 6–9 synonyms per call (e.g. S1 aligned:
+`['teacher', 'tutor', 'support', 'reply', 'replied', 'response',
+'answered', 'feedback', 'help']`) and finished the whole investigation in
+11 total searches instead of 18–24 — each search now covers far more of
+the real wording learners actually used, exactly the intended effect of
+letting the model pack synonyms into one call instead of guessing one
+word at a time against a 3-searches-per-direction cap.
+
+S4 is unchanged at 1/5 and is the same, already-documented cause as the
+previous round, not a new issue: across the 5 runs the model classified
+FB024 as countervailing twice, linked it nowhere at all twice, and matched
+the answer key's "aligned, Limited" reading once. That is the same
+defensible disagreement recorded above (the countervailing rule tightened
+two rounds ago reads FB024 — "I nearly dropped out ... would have liked to
+pause the course instead of withdrawing" — as describing someone who did
+*not* withdraw, which is a legitimate basis for "countervailing" even
+though the answer key treats it as weak aligned evidence). Multi-keyword
+search doesn't change what the model *decides* about a comment it already
+reliably finds; FB024 was found via keyword search in effectively every
+run before and after this change.
+
+All 5 runs' `brief.md`, `brief.html`, `evidence_records.json`,
+`exception_log.json` and `audit_log.jsonl` were scanned for every
+`forbidden_output_strings` entry: clean, as in every previous round.
+`tests/fixtures/expected_results.json` and `answer_key.md` were not
+edited to match these results.
+
 ## A note on `tests/fixtures/answer_key.md`'s closing remark
 
 The answer key's final note ("Copilot calculations are LLM-performed, not a

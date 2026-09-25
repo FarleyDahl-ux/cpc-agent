@@ -129,20 +129,91 @@ def test_search_comments_filters_by_mode_region_keyword():
     assert online and all(c["mode"] == "Online" for c in online)
     region_a = tools.search_comments(signal_id="S1", direction="aligned", reason="r2", delivery_region="Region A")
     assert region_a and all(c["region"] == "Region A" for c in region_a)
-    keyword_hits = tools.search_comments(signal_id="S1", direction="countervailing", reason="r3", keyword="assessment")
+    keyword_hits = tools.search_comments(signal_id="S1", direction="countervailing", reason="r3", keywords=["assessment"])
     assert keyword_hits and all("assessment" in c["text"].lower() for c in keyword_hits)
+
+
+def test_search_comments_matches_any_of_several_keywords():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    # "replied" and "assessment" match different comments; a multi-keyword
+    # search should return the union, not just one or the other alone.
+    replied_only = {
+        c["id"] for c in tools.search_comments(signal_id="S1", direction="aligned", reason="r", keywords=["replied"])
+    }
+    assessment_only = {
+        c["id"] for c in tools.search_comments(signal_id="S1", direction="countervailing", reason="r", keywords=["assessment"])
+    }
+    both = {
+        c["id"]
+        for c in tools.search_comments(signal_id="S2", direction="aligned", reason="r", keywords=["replied", "assessment"])
+    }
+    assert replied_only and assessment_only  # sanity: both keywords individually match something
+    # The combined search matches comments found by either keyword alone
+    # (proving OR-matching, not just one keyword winning) — allowing for the
+    # 5-result cap possibly truncating the full union.
+    assert both.issubset(replied_only | assessment_only)
+    assert both & replied_only
+    assert both & assessment_only
+
+
+def test_search_comments_keywords_are_case_insensitive():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    lower = {c["id"] for c in tools.search_comments(signal_id="S1", direction="aligned", reason="r", keywords=["assessment"])}
+    upper = {
+        c["id"] for c in tools.search_comments(signal_id="S1", direction="countervailing", reason="r", keywords=["ASSESSMENT"])
+    }
+    assert lower == upper
+
+
+def test_search_comments_blank_and_duplicate_keyword_entries_are_ignored():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    padded = tools.search_comments(
+        signal_id="S1", direction="aligned", reason="r", keywords=["assessment", "", "  ", "assessment"]
+    )
+    plain = tools.search_comments(signal_id="S2", direction="aligned", reason="r", keywords=["assessment"])
+    assert {c["id"] for c in padded} == {c["id"] for c in plain}
+
+
+def test_search_comments_tolerates_a_bare_string_instead_of_a_list():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    as_string = tools.search_comments(signal_id="S1", direction="aligned", reason="r", keywords="assessment")
+    as_list = tools.search_comments(signal_id="S2", direction="aligned", reason="r", keywords=["assessment"])
+    assert {c["id"] for c in as_string} == {c["id"] for c in as_list}
+
+
+def test_search_comments_rejects_call_with_only_blank_keywords_and_no_other_filter():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    with pytest.raises(ToolError):
+        tools.search_comments(signal_id="S1", direction="aligned", reason="r", keywords=["", "   "])
+
+
+def test_search_comments_dedup_is_order_and_case_independent_for_keyword_sets():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    tools.search_comments(signal_id="S1", direction="aligned", reason="r", keywords=["reply", "help"])
+    with pytest.raises(ToolError):
+        # Same two keywords, different order and case — still a repeat.
+        tools.search_comments(signal_id="S1", direction="aligned", reason="different reason", keywords=["HELP", "Reply"])
+    # A genuinely different keyword set is not a repeat.
+    tools.search_comments(signal_id="S1", direction="aligned", reason="r2", keywords=["reply"])
+    assert tools.search_count("S1", "aligned") == 2
 
 
 def test_search_comments_enforces_per_direction_budget_and_records_limitation():
     signals, comments = _signals_and_comments()
     tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
     for i, kw in enumerate(["assessment", "help", "reply"]):
-        tools.search_comments(signal_id="S1", direction="aligned", reason=f"attempt {i}", keyword=kw)
+        tools.search_comments(signal_id="S1", direction="aligned", reason=f"attempt {i}", keywords=[kw])
     assert tools.search_count("S1", "aligned") == MAX_SEARCHES_PER_DIRECTION
     assert "S1" not in tools.limitations  # not exhausted yet, just at the cap
 
     with pytest.raises(ToolError):
-        tools.search_comments(signal_id="S1", direction="aligned", reason="one more", keyword="teacher")
+        tools.search_comments(signal_id="S1", direction="aligned", reason="one more", keywords=["teacher"])
 
     assert any("budget" in text.lower() for text in tools.limitations["S1"])
     # The other direction is untouched by the aligned-direction budget.
@@ -228,8 +299,8 @@ def test_note_no_evidence_and_ask_analyst():
 
 
 def _search_both_directions(tools, signal_id, keyword_prefix="k"):
-    tools.search_comments(signal_id=signal_id, direction="aligned", reason="r", keyword=f"{keyword_prefix}a")
-    tools.search_comments(signal_id=signal_id, direction="countervailing", reason="r", keyword=f"{keyword_prefix}b")
+    tools.search_comments(signal_id=signal_id, direction="aligned", reason="r", keywords=[f"{keyword_prefix}a"])
+    tools.search_comments(signal_id=signal_id, direction="countervailing", reason="r", keywords=[f"{keyword_prefix}b"])
 
 
 def test_unmet_requirements_lists_signals_missing_direction_searches():
@@ -277,7 +348,7 @@ def test_finish_investigation_succeeds_once_requirements_met():
 
 def test_finalize_limitations_records_gap_for_unsearched_direction():
     tools = InvestigationTools(signals=[_one_signal()], eligible_comments=_two_comments(), ask_analyst_fn=lambda q: "n/a")
-    tools.search_comments(signal_id="S1", direction="aligned", reason="r", keyword="waited")
+    tools.search_comments(signal_id="S1", direction="aligned", reason="r", keywords=["waited"])
     # countervailing was never searched
     tools.finalize_limitations()
     assert any("countervailing" in text for text in tools.limitations["S1"])
@@ -294,7 +365,7 @@ def test_finalize_limitations_does_not_duplicate_text():
 
 def test_build_plan_structure_and_no_comment_text_leak():
     tools = InvestigationTools(signals=[_one_signal()], eligible_comments=_two_comments(), ask_analyst_fn=lambda q: "n/a")
-    tools.search_comments(signal_id="S1", direction="aligned", reason="looking for support complaints", keyword="waited")
+    tools.search_comments(signal_id="S1", direction="aligned", reason="looking for support complaints", keywords=["waited"])
     tools.record_link("S1", "FB003", "aligned", "Teacher responsiveness and support", "reports a delayed reply")
     tools.finalize_limitations()
     plan = tools.build_plan()
@@ -404,10 +475,10 @@ def test_run_investigation_drives_tool_loop_to_completion():
         [
             _FakeMessage(tool_calls=[_call("c1", "get_comment_corpus_profile", {})]),
             _FakeMessage(
-                tool_calls=[_call("c2", "search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "looking for complaints", "keyword": "waited"})]
+                tool_calls=[_call("c2", "search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "looking for complaints", "keywords": ["waited"]})]
             ),
             _FakeMessage(
-                tool_calls=[_call("c3", "search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "looking for praise", "keyword": "replied"})]
+                tool_calls=[_call("c3", "search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "looking for praise", "keywords": ["replied"]})]
             ),
             _FakeMessage(
                 tool_calls=[
@@ -469,10 +540,10 @@ def test_run_investigation_finish_rejected_then_accepted_after_more_searches():
             # First attempt: nothing searched yet — must be rejected.
             _FakeMessage(tool_calls=[_call("c1", "finish_investigation", {})]),
             _FakeMessage(
-                tool_calls=[_call("c2", "search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r", "keyword": "waited"})]
+                tool_calls=[_call("c2", "search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r", "keywords": ["waited"]})]
             ),
             _FakeMessage(
-                tool_calls=[_call("c3", "search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "r", "keyword": "replied"})]
+                tool_calls=[_call("c3", "search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "r", "keywords": ["replied"]})]
             ),
             _FakeMessage(tool_calls=[_call("c4", "note_no_evidence", {"signal_id": "S1", "reason": "nothing clearly on point"})]),
             # Second attempt: now it should succeed.
