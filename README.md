@@ -26,6 +26,12 @@ Before the model can search any feedback, it must call `submit_plan`: a one/two-
 
 When the model links a comment to a signal but the reading is genuinely uncertain, it can set `record_link`'s `ambiguous` flag with a short `ambiguous_note` explaining why, instead of silently dropping the link or forcing a confident classification. The link still counts normally for evidence status; the flag and note are carried into `evidence_records.json` (`ambiguous_links`) and shown as an "Ambiguous" badge on the dashboard's review page, for a reviewer to look at more closely.
 
+## Findings review and the brief
+
+An "edit" (add a note) or "reject" decision at the findings review gate requires a non-empty note — enforced in both the dashboard and the CLI (interactively, by re-prompting until one is given; in scripted mode, by rejecting a blank note outright). A rejected finding never appears as its own signal in the brief, but is listed under "What's not included" by measure and the analyst's own reason, alongside data exclusions and quarantines.
+
+The brief favours plain language over internal bookkeeping: sources are described in plain language rather than by CSV filename, a signal's rule line drops the raw sample-size eligibility check it carries for `evidence_records.json` (e.g. "n=380 ≥ 30"), and the "Excerpts: ..." selection-method label is no longer shown (the field stays in `evidence_records.json`, just not rendered). When an accepted finding's excerpt is a comment the model flagged as ambiguous, its note appears alongside that excerpt. An excerpt-selection field reads "none" rather than "automatic selection" when a finding has no linked comments to select from at all.
+
 ## Retention
 
 Once a run reaches its final approval/return decision — a "return" closes the run just like an "approve" does; revising means starting a new run, not reopening this one — `eligible_comments.json` (the one *working* file a run folder holds that has raw comment text) is deleted. `brief.md` and `brief.html` are never touched: they are the approved workshop output, excerpts included, and stay exactly as generated. IDs, counts, evidence records, reviewer decisions and the audit log are all untouched too; the deletion itself is recorded in that run's `audit_log.jsonl` as a `retention_purge` event.

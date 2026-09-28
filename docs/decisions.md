@@ -945,3 +945,135 @@ chosen and recorded here.
   already answers, just rolled up instead of event-by-event; adding a
   fifth tab for a rollup of the fourth would fragment one view into two
   for no reason a user asked for.
+
+## Brief and review fixes
+
+- **A note is required for "edit" and "reject" at the findings review
+  gate, enforced independently (but identically in effect) in three
+  places: `gates.review_findings`' scripted path raises `ValueError` on a
+  blank note, its interactive path re-prompts until a non-blank one is
+  given, and `dashboard_state.apply_finding_review` returns `(False, ...)`
+  the same way it already does for an invalid decision.** Three different
+  failure modes for three different callers, deliberately: scripted mode
+  is a fixed answers file with no one at a keyboard to ask again, so a
+  loud, immediate exception is correct — a silently-defaulted note would
+  hide a real gap in the demo/test fixture; the CLI has a human at the
+  keyboard, so re-prompting (matching how a blank excerpt or scope-confirm
+  answer is already handled interactively) is more useful than crashing;
+  the dashboard is an HTTP request that must never partially apply a
+  rejected submission, which `(False, message)` plus the existing
+  `_error_response` page already guarantees for every other validation
+  failure on this route. "accept" never requires a note, unchanged.
+- **The dashboard's client-side guard (`review.html`'s `submit` listener,
+  keyed off `event.submitter`) is a convenience on top of the
+  authoritative server-side check, not a replacement for it** — it saves
+  a round trip for the common case (empty note, Reject clicked) but a
+  request with JavaScript disabled, or a hand-crafted POST, still hits
+  `apply_finding_review`'s own validation. The label text next to the
+  textarea ("required for Add a note / Reject") was updated to match,
+  since a still-optional-looking label next to a now-required field would
+  be actively misleading.
+- **Rejected findings are threaded into `populate_cpc_template`/
+  `render_brief_html` as a new, optional `rejected_records` parameter**,
+  not folded into `accepted_records` with a filter inside `brief.py`. The
+  two lists mean genuinely different things to every existing caller of
+  these functions (signal table / feedback section / blockquote rendering
+  all iterate `accepted_records` and must never see a rejected finding),
+  so keeping them as two separate, explicitly-named arguments makes "a
+  rejected finding never becomes a signal article" true by construction —
+  there's no filter to bypass, because rejected records are never in the
+  list that produces signal articles at all. Added at the end of each
+  function's parameter list with a `None` default specifically so every
+  existing positional call site (tests included) keeps working unchanged
+  — only `main.run_pipeline` and `dashboard_state.generate_brief_preview`
+  (which already compute `accepted`/`reviewed` locally) needed a one-line
+  addition to also compute and pass `rejected`.
+- **A rejected finding's line in "What's not included"
+  (`brief._rejected_lines`) reads `"{finding_id} ({label}) was reviewed
+  and rejected by the analyst: {reason}"`, reusing
+  `readable_measure_label` for the measure — the same function the signal
+  table, the questions section and the dashboard's Overview tiles already
+  use — never the raw code name.** Falls back to "no reason recorded"
+  only if `reviewer_note` is somehow empty (defensive: the note
+  requirement above means this shouldn't happen via either gate, but the
+  function takes `EvidenceRecord`s directly and has no way to enforce that
+  invariant itself). Merged into the *same* list as exclusions/
+  quarantines/limitations (`_exception_lines`/`_render_context_section`
+  both changed to concatenate, not a separate subsection) since the
+  request asks for it inside "What's not included," and a rejected
+  finding is, functionally, one more reason something isn't in the brief.
+- **The ambiguous-link note is shown next to its excerpt in `brief.html`
+  only, not in `brief.md`.** `brief.md`'s section 3 was never an excerpt
+  view to begin with — `_feedback_block` lists aligned/countervailing
+  comment *IDs*, never quoted text (see the "Ambiguous links" round) — so
+  there is no "next to that excerpt" location for it to occupy there. In
+  `brief.html`, `_excerpt_blockquotes` gained an `ambiguous_links` parameter
+  (from `record.ambiguous_links`, already on every `EvidenceRecord`) and
+  appends a small `<span class="ambiguous-note">` inside the blockquote
+  for exactly the comment IDs that are keys of that dict — never for a
+  comment that happens to be quoted but wasn't flagged, and never when the
+  ambiguous comment isn't actually one of the (at most two) shown
+  excerpts, since the lookup only ever runs over `excerpt_ids`, the same
+  list already capped by `MAX_HTML_EXCERPTS`.
+- **The "Excerpts: automatic selection (first two by ID)." / "Excerpts:
+  analyst selection." caption is removed from `brief.html` entirely
+  (`_excerpt_selection_note` deleted, its call sites removed from
+  `_render_evidence_column`), while `EvidenceRecord.aligned_excerpt_selection`/
+  `countervailing_excerpt_selection` and the constants that populate them
+  are untouched.** The brief is workshop-facing; how an excerpt was chosen
+  is process metadata for whoever ran the review, not something the
+  workshop group needs to read alongside the evidence itself — it stays
+  exactly where it already lived for that purpose, `evidence_records.json`
+  (and the audit log, via `findings_review`'s logged event).
+- **Sources are described in plain language via a small, brief-local
+  lookup (`brief._SOURCE_DESCRIPTIONS`/`_describe_source`), keyed by the
+  literal filename, with an identity fallback for anything unmapped** —
+  not a change to `config.ALL_FILES` or to what's stored anywhere in
+  JSON output. `evidence_records.json`'s `source_file` field and
+  `exception_log.json`/`context.files_found`'s filenames are exactly what
+  CLAUDE.md's schema and the rest of the pipeline expect them to be;
+  only `brief.py`'s three rendering call sites (`_scope_text`'s "Sources
+  used" line, `_signal_table_row`'s Source column, `_render_context_section`'s
+  "Figures come from" line) call `_describe_source` before interpolating a
+  filename into brief text. The identity fallback (return the filename
+  unchanged if it's not in the map) means an unmapped file degrades to the
+  old behaviour rather than silently vanishing from the brief.
+- **This round's "describe sources in plain language" is scoped to
+  `brief.py` only — `dashboard_state.build_workflow_summary`'s "sources
+  used" list (Agent Activity tab, from the earlier "Workflow summary
+  panel" round) still lists literal filenames, deliberately unchanged.**
+  That panel is an audit/traceability view for the person running the
+  pipeline, built explicitly "from the run record" (state.json's
+  `files_found`) — a literal filename is exactly the right level of detail
+  there, the same way `audit_log.jsonl` and `exception_log.json` keep
+  literal filenames/field names throughout. The brief is the one surface
+  meant for a workshop audience with no reason to know CSV filenames
+  exist; conflating the two would mean picking one description style that
+  serves neither audience well.
+- **The technical eligibility fragment stripped from a brief's rule line
+  is matched by regex (`brief._TECHNICAL_N_SUFFIX`,
+  `r";\s*n\s*=\s*\d+(?:\.\d+)?\s*[≥>=]+\s*\d+(?:\.\d+)?\s*$"`), not by
+  splitting on the literal string `"; n="`.** Only a *satisfaction*
+  signal's `comparison_rule` ever carries this suffix
+  (`metrics.flag_signals`: `f"; n={n_respondents:.0f} ≥ {SATISFACTION_MIN_N}"`)
+  — unit and segment withdrawal rules never do — so the regex is a no-op
+  on those and `_plain_rule_text` is safe to call unconditionally on every
+  record's `comparison_rule`, in both `_signal_table_row` (brief.md) and
+  `_render_measure_column`'s rule div (brief.html), rather than needing a
+  per-signal-kind branch. `comparison_rule` itself is never modified —
+  only the value handed to the brief's string interpolation is; the field
+  stored on `EvidenceRecord`/`evidence_records.json` keeps the full clause
+  CLAUDE.md's schema expects.
+- **`_excerpt_selection_label` gained a required `linked_ids` parameter
+  and returns a new `NO_LINKED_COMMENTS_SELECTION` ("none") when it's
+  empty, in both `gates.py` (CLI) and `dashboard_state.py` (dashboard) —
+  the two independent call sites for the two independent review paths.**
+  Before this, a signal with zero aligned (or zero countervailing)
+  comments still got labelled "automatic selection (first two by ID)" for
+  that side, which was true only in the vacuous sense that selecting from
+  an empty set trivially satisfies "first two by ID" — it implied a
+  default was actively applied to real candidates, when there were none to
+  choose from at all. "none" is a third, honest answer distinct from both
+  "automatic" and "analyst selection", added as a new constant in
+  `evidence.py` alongside the two it sits next to rather than overloading
+  either existing one.

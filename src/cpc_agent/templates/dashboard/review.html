@@ -38,7 +38,7 @@
       <button class="btn ed {{ 'current' if r.reviewer_status == 'edit' else '' }}" type="submit" name="decision" value="edit">Add a note</button>
       <button class="btn rej {{ 'current' if r.reviewer_status == 'reject' else '' }}" type="submit" name="decision" value="reject">Reject</button>
     </div>
-    <label for="note-{{ r.finding_id }}" class="note">Note (recorded in the audit log)</label>
+    <label for="note-{{ r.finding_id }}" class="note">Note (required for Add a note / Reject; recorded in the audit log)</label>
     <textarea id="note-{{ r.finding_id }}" name="note" placeholder="Note for the workshop">{{ r.reviewer_note }}</textarea>
   </form>
 </article>
@@ -51,6 +51,16 @@ document.addEventListener("change", function (e) {
     var side = e.target.dataset.side;
     var boxes = document.querySelectorAll('input[data-side="' + side + '"]:checked');
     if (boxes.length > 2) { e.target.checked = false; }
+  }
+});
+document.addEventListener("submit", function (e) {
+  var submitter = e.submitter;
+  if (!submitter || submitter.name !== "decision") { return; }
+  if (submitter.value !== "edit" && submitter.value !== "reject") { return; }
+  var note = e.target.querySelector("textarea[name=note]");
+  if (note && !note.value.trim()) {
+    e.preventDefault();
+    note.focus();
   }
 });
 </script>

@@ -217,8 +217,10 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     assert "Region C blended delivery was excluded because the 2025 withdrawal figure was missing." in html_text
     assert "delivery_region=Region C" not in html_text
 
-    # No excerpt choice was made in examples/demo_answers.json -> automatic default, labelled as such.
-    assert "Excerpts: automatic selection (first two by ID)." in html_text
+    # The "Excerpts: ..." selection-method label used to appear here — now
+    # dropped from the brief; the field still lives in evidence_records.json.
+    assert "Excerpts:" not in html_text
+    assert by_id["S1"]["aligned_excerpt_selection"] == "automatic selection (first two by ID)"
 
     # brief.html works offline: no external resources at all.
     assert "googleapis" not in html_text

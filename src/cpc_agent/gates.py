@@ -16,7 +16,12 @@ if TYPE_CHECKING:
     from .screening import EligibleComment
     from .validation import BlankValueIssue, LowSampleIssue, ReconciliationIssue
 
-from .evidence import ANALYST_EXCERPT_SELECTION, AUTOMATIC_EXCERPT_SELECTION, readable_measure_label
+from .evidence import (
+    ANALYST_EXCERPT_SELECTION,
+    AUTOMATIC_EXCERPT_SELECTION,
+    NO_LINKED_COMMENTS_SELECTION,
+    readable_measure_label,
+)
 
 _TRUTHY = {"y", "yes", "true", "1"}
 _UNSPECIFIED_ANALYST = "(not provided)"
@@ -44,7 +49,12 @@ def _resolve_excerpts(requested: list[str] | None, linked_ids: list[str]) -> tup
     return filtered[:MAX_EXCERPTS], False
 
 
-def _excerpt_selection_label(was_automatic: bool) -> str:
+def _excerpt_selection_label(was_automatic: bool, linked_ids: list[str]) -> str:
+    """"none" when there was nothing to select from (no comments linked to
+    this side at all) — distinct from "automatic selection", which implies
+    a default was actually applied to a non-empty set of candidates."""
+    if not linked_ids:
+        return NO_LINKED_COMMENTS_SELECTION
     return AUTOMATIC_EXCERPT_SELECTION if was_automatic else ANALYST_EXCERPT_SELECTION
 
 
@@ -196,6 +206,12 @@ class Gates:
                     decision = entry
                     note = ""
                     excerpts_entry = {}
+                decision = decision if decision in ("accept", "edit", "reject") else "accept"
+                if decision in ("edit", "reject") and not str(note or "").strip():
+                    raise ValueError(
+                        f"Scripted findings_review answer for {record.finding_id!r} is {decision!r} but has "
+                        "no note — a note is required for 'edit' and 'reject'."
+                    )
                 aligned_excerpts, aligned_auto = _resolve_excerpts(excerpts_entry.get("aligned"), record.aligned_ids)
                 countervailing_excerpts, countervailing_auto = _resolve_excerpts(
                     excerpts_entry.get("countervailing"), record.countervailing_ids
@@ -208,7 +224,11 @@ class Gates:
                 self._print_linked_comments("Countervailing", record.countervailing_ids, comments_by_id)
                 answer = self._prompt("accept / edit / reject: ").lower()
                 decision = answer if answer in ("accept", "edit", "reject") else "accept"
-                note = self._prompt("Note: ") if decision == "edit" else ""
+                note = ""
+                if decision in ("edit", "reject"):
+                    note = self._prompt("Note (required for edit/reject): ").strip()
+                    while not note:
+                        note = self._prompt("A note is required. Note: ").strip()
                 aligned_excerpts, aligned_auto = self._choose_excerpts_interactively("aligned", record.aligned_ids)
                 countervailing_excerpts, countervailing_auto = self._choose_excerpts_interactively(
                     "countervailing", record.countervailing_ids
@@ -219,8 +239,10 @@ class Gates:
             record.reviewer_note = note
             record.aligned_excerpt_ids = aligned_excerpts
             record.countervailing_excerpt_ids = countervailing_excerpts
-            record.aligned_excerpt_selection = _excerpt_selection_label(aligned_auto)
-            record.countervailing_excerpt_selection = _excerpt_selection_label(countervailing_auto)
+            record.aligned_excerpt_selection = _excerpt_selection_label(aligned_auto, record.aligned_ids)
+            record.countervailing_excerpt_selection = _excerpt_selection_label(
+                countervailing_auto, record.countervailing_ids
+            )
             self._log(
                 "findings_review",
                 finding_id=record.finding_id,

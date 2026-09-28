@@ -244,6 +244,8 @@ def apply_finding_review(
         return False, f"This run is not awaiting findings review (status: {state['status']})."
     if decision not in ("accept", "edit", "reject"):
         return False, f"Invalid decision: {decision!r}."
+    if decision in ("edit", "reject") and not (note or "").strip():
+        return False, "A note is required for 'edit' and 'reject'."
 
     records = load_evidence_records(run_id, runs_dir)
     record = next((r for r in records if r["finding_id"] == finding_id), None)
@@ -260,8 +262,10 @@ def apply_finding_review(
     record["reviewer_note"] = note or ""
     record["aligned_excerpt_ids"] = aligned_resolved
     record["countervailing_excerpt_ids"] = countervailing_resolved
-    record["aligned_excerpt_selection"] = _excerpt_selection_label(aligned_auto)
-    record["countervailing_excerpt_selection"] = _excerpt_selection_label(countervailing_auto)
+    record["aligned_excerpt_selection"] = _excerpt_selection_label(aligned_auto, record["aligned_ids"])
+    record["countervailing_excerpt_selection"] = _excerpt_selection_label(
+        countervailing_auto, record["countervailing_ids"]
+    )
 
     save_evidence_records(run_id, records, runs_dir)
 
@@ -310,6 +314,7 @@ def generate_brief_preview(run_id: str, runs_dir: Path = config.RUNS_DIR) -> tup
 
     records = load_evidence_records(run_id, runs_dir)
     accepted = [EvidenceRecord(**r) for r in records if r["reviewer_status"] in ("accept", "edit")]
+    rejected = [EvidenceRecord(**r) for r in records if r["reviewer_status"] == "reject"]
     context = _reconstruct_context(state)
     exceptions = load_exceptions(run_id, runs_dir)
     comments_by_id = _reconstruct_comments(run_id, state, runs_dir)
@@ -320,12 +325,14 @@ def generate_brief_preview(run_id: str, runs_dir: Path = config.RUNS_DIR) -> tup
         accepted, context, run_id, state.get("data_version", ""), config.INSTRUCTION_VERSION,
         generated_date, state.get("snapshot_date", "n/a"), exceptions, target_dir,
         analyst_name=state.get("analyst_name", "(not provided)"),
+        rejected_records=rejected,
     )
     decision = "approve" if state["status"] == STATUS_APPROVED else "return" if state["status"] == STATUS_RETURNED else "pending"
     render_brief_html(
         accepted, context, run_id, state.get("data_version", ""), generated_date,
         state.get("snapshot_date", "n/a"), exceptions, state.get("analyst_name", "(not provided)"),
         decision, comments_by_id, target_dir,
+        rejected_records=rejected,
     )
     if decision != "pending":
         update_brief_status(target_dir / "brief.md", decision)

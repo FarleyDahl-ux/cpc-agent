@@ -3,6 +3,7 @@ src/cpc_agent/templates/brief.css design (brief.html) from accepted/edited
 evidence records only."""
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from html import escape as _html_escape
 from pathlib import Path
@@ -23,14 +24,52 @@ APPROVED_TITLE = "# Course Performance Workshop Brief"
 
 MAX_HTML_EXCERPTS = 2
 
+# Plain-language descriptions of each source file, for the brief only —
+# evidence_records.json/exception_log.json keep the literal filename
+# (config.ALL_FILES); a workshop audience has no use for CSV filenames.
+_SOURCE_DESCRIPTIONS: dict[str, str] = {
+    "course_metrics.csv": "course enrolment and withdrawal records",
+    "satisfaction.csv": "learner satisfaction survey results",
+    "unit_results.csv": "unit enrolment and completion records",
+    "student_feedback.csv": "learner feedback comments",
+}
+
+
+def _describe_source(filename: str) -> str:
+    return _SOURCE_DESCRIPTIONS.get(filename, filename)
+
+
+# A signal's comparison_rule sometimes carries a trailing technical
+# eligibility check appended for evidence_records.json's own audit trail
+# (e.g. "; n=380 ≥ 30", see metrics.flag_signals) — required there, but not
+# something a workshop audience needs to parse. The brief drops it; the
+# stored comparison_rule field is never modified.
+_TECHNICAL_N_SUFFIX = re.compile(r";\s*n\s*=\s*\d+(?:\.\d+)?\s*[≥>=]+\s*\d+(?:\.\d+)?\s*$")
+
+
+def _plain_rule_text(comparison_rule: str) -> str:
+    return _TECHNICAL_N_SUFFIX.sub("", comparison_rule).strip()
+
+
+def _rejected_lines(rejected_records: list[EvidenceRecord]) -> list[str]:
+    """One plain-language line per rejected finding — measure and the
+    analyst's own reason (reviewer_note, required for a "reject" decision
+    — see gates.review_findings / dashboard_state.apply_finding_review)."""
+    lines = []
+    for record in rejected_records:
+        label = readable_measure_label(record.measure, record.segment)
+        reason = record.reviewer_note.strip() if record.reviewer_note else "no reason recorded"
+        lines.append(f"{record.finding_id} ({label}) was reviewed and rejected by the analyst: {reason}")
+    return lines
+
 
 def _scope_text(context: ScopeContext) -> str:
-    present = [filename for _key, filename, is_present in context.files_found if is_present]
-    missing = [filename for _key, filename, is_present in context.files_found if not is_present]
+    present = [_describe_source(filename) for _key, filename, is_present in context.files_found if is_present]
+    missing = [_describe_source(filename) for _key, filename, is_present in context.files_found if not is_present]
     lines = [
         f"Course {context.course_code} — {context.course_title}. "
         f"Period {context.current_period}, compared with {context.previous_period}.",
-        "Files used: " + ", ".join(present) + ".",
+        "Sources used: " + ", ".join(present) + ".",
     ]
     if missing:
         lines.append("Not available: " + ", ".join(missing) + ".")
@@ -41,7 +80,8 @@ def _signal_table_row(record: EvidenceRecord) -> str:
     label = readable_measure_label(record.measure, record.segment)
     return (
         f"| {record.finding_id} | {label} | {record.calculation} "
-        f"| {record.comparison_rule} | {record.source_file}, {record.period}, n={record.n:.0f} "
+        f"| {_plain_rule_text(record.comparison_rule)} "
+        f"| {_describe_source(record.source_file)}, {record.period}, n={record.n:.0f} "
         f"| {record.evidence_status} |"
     )
 
@@ -73,8 +113,9 @@ def _exception_summaries(exceptions: dict) -> list[str]:
     return summaries
 
 
-def _exception_lines(exceptions: dict) -> list[str]:
-    return [f"- {summary}" for summary in _exception_summaries(exceptions)]
+def _exception_lines(exceptions: dict, rejected_records: list[EvidenceRecord] | None = None) -> list[str]:
+    summaries = _exception_summaries(exceptions) + _rejected_lines(rejected_records or [])
+    return [f"- {summary}" for summary in summaries]
 
 
 def _question_text(record: EvidenceRecord) -> str:
@@ -108,11 +149,17 @@ def populate_cpc_template(
     output_dir: Path,
     analyst_name: str = "(not provided)",
     template_path: Path = config.TEMPLATE_PATH,
+    rejected_records: list[EvidenceRecord] | None = None,
 ) -> Path:
     """Writes runs/<run_id>/brief.md from accepted_records only. The brief
     is always written with status "Pending final approval" and decision
     "pending" — update_brief_status records the outcome of gate 9 once the
     analyst has actually seen the file.
+
+    rejected_records is optional and only ever used to list what's not
+    included (section 4) — a rejected finding never appears in the signal
+    table, the feedback section or the workshop questions, only as a plain
+    line naming its measure and the analyst's reason.
 
     Every template placeholder line written in square brackets is replaced
     by its generated content (the placeholder text itself is removed, not
@@ -146,7 +193,7 @@ def populate_cpc_template(
     feedback_body = "\n\n".join(_feedback_block(r) for r in accepted_records) or "No approved findings."
     text = text.replace(feedback_anchor, feedback_anchor + "\n\n" + feedback_body)
 
-    exception_lines = _exception_lines(exceptions)
+    exception_lines = _exception_lines(exceptions, rejected_records)
     exceptions_body = "\n".join(exception_lines) if exception_lines else "- None recorded."
     text = text.replace("[Missing data, quarantined comments, low samples, unresolved issues]", exceptions_body)
 
@@ -293,12 +340,17 @@ def _render_measure_column(record: EvidenceRecord) -> str:
         f"      <h3>{_escape(_measure_title(record))}</h3>\n"
         f'      <div class="value">{record.value:.0f}%<small>{_value_suffix(record)}</small></div>\n'
         f"      {gauge_html}\n"
-        f'      <div class="rule">{_escape(record.comparison_rule)}</div>\n'
+        f'      <div class="rule">{_escape(_plain_rule_text(record.comparison_rule))}</div>\n'
         "    </div>"
     )
 
 
-def _excerpt_blockquotes(excerpt_ids: list[str], comments_by_id: dict[str, EligibleComment], other: bool) -> str:
+def _excerpt_blockquotes(
+    excerpt_ids: list[str],
+    comments_by_id: dict[str, EligibleComment],
+    other: bool,
+    ambiguous_links: dict[str, str],
+) -> str:
     css_class = ' class="other"' if other else ""
     parts = []
     for comment_id in excerpt_ids[:MAX_HTML_EXCERPTS]:
@@ -307,17 +359,12 @@ def _excerpt_blockquotes(excerpt_ids: list[str], comments_by_id: dict[str, Eligi
         # (built from screening_result.eligible in main.py) — a quarantined
         # or otherwise-unknown id can only ever fall back to the placeholder.
         text = _escape(comment.text) if comment is not None else "(comment text unavailable)"
-        parts.append(f"<blockquote{css_class}>{text}<cite>{_escape(comment_id)}</cite></blockquote>")
+        ambiguous_note = ambiguous_links.get(comment_id)
+        note_html = (
+            f'<span class="ambiguous-note">Ambiguous: {_escape(ambiguous_note)}</span>' if ambiguous_note else ""
+        )
+        parts.append(f"<blockquote{css_class}>{text}<cite>{_escape(comment_id)}</cite>{note_html}</blockquote>")
     return "\n        ".join(parts)
-
-
-def _excerpt_selection_note(excerpt_ids: list[str], selection_label: str) -> str:
-    """A small caption crediting how the shown excerpt(s) were chosen — the
-    analyst's own choice, or the automatic first-two-by-ID default when
-    they made none. Omitted when there is nothing to caption."""
-    if not excerpt_ids:
-        return ""
-    return f'<p class="none">Excerpts: {_escape(selection_label)}.</p>'
 
 
 def _render_evidence_column(record: EvidenceRecord, comments_by_id: dict[str, EligibleComment]) -> str:
@@ -328,22 +375,18 @@ def _render_evidence_column(record: EvidenceRecord, comments_by_id: dict[str, El
     blocks: list[str] = []
     if aligned_count:
         full_width = ' style="flex-basis:100%"' if not countervailing_count else ""
-        note = _excerpt_selection_note(record.aligned_excerpt_ids, record.aligned_excerpt_selection)
         blocks.append(
             f"<div{full_width}>\n"
             f'        <h4>Comments consistent with this result ({aligned_count})</h4>\n'
-            f"        {_excerpt_blockquotes(record.aligned_excerpt_ids, comments_by_id, other=False)}\n"
-            + (f"        {note}\n" if note else "")
+            f"        {_excerpt_blockquotes(record.aligned_excerpt_ids, comments_by_id, False, record.ambiguous_links)}\n"
             + "      </div>"
         )
     if countervailing_count:
         full_width = ' style="flex-basis:100%"' if not aligned_count else ""
-        note = _excerpt_selection_note(record.countervailing_excerpt_ids, record.countervailing_excerpt_selection)
         blocks.append(
             f"<div{full_width}>\n"
             f'        <h4 class="other">Comments pointing the other way ({countervailing_count})</h4>\n'
-            f"        {_excerpt_blockquotes(record.countervailing_excerpt_ids, comments_by_id, other=True)}\n"
-            + (f"        {note}\n" if note else "")
+            f"        {_excerpt_blockquotes(record.countervailing_excerpt_ids, comments_by_id, True, record.ambiguous_links)}\n"
             + "      </div>"
         )
     if not blocks:
@@ -406,13 +449,15 @@ def _render_header(context: ScopeContext, analyst_name: str, decision: str, gene
     )
 
 
-def _render_context_section(context: ScopeContext, exceptions: dict) -> str:
-    present = [filename for _key, filename, is_present in context.files_found if is_present]
+def _render_context_section(
+    context: ScopeContext, exceptions: dict, rejected_records: list[EvidenceRecord] | None = None
+) -> str:
+    present = [_describe_source(filename) for _key, filename, is_present in context.files_found if is_present]
     covers = (
         "Findings that crossed the review thresholds this run, with the student comments that relate "
         f"to each. Figures come from {', '.join(present)}."
     )
-    items = _exception_summaries(exceptions)
+    items = _exception_summaries(exceptions) + _rejected_lines(rejected_records or [])
     if items:
         items_html = "\n        ".join(f"<li>{_escape(item)}</li>" for item in items)
     else:
@@ -446,6 +491,7 @@ def render_brief_html(
     comments_by_id: dict[str, EligibleComment],
     output_dir: Path,
     css_path: Path = config.BRIEF_CSS_PATH,
+    rejected_records: list[EvidenceRecord] | None = None,
 ) -> Path:
     """Writes runs/<run_id>/brief.html from accepted_records only, styled
     per src/cpc_agent/templates/brief.css (design source: docs/brief_mockup.html,
@@ -456,10 +502,13 @@ def render_brief_html(
     (EvidenceRecord.aligned_excerpt_ids/countervailing_excerpt_ids);
     quarantined comments can never appear because comments_by_id only ever
     contains eligible comments. No external resources (fonts, scripts) are
-    loaded, so the brief renders correctly offline."""
+    loaded, so the brief renders correctly offline.
+
+    rejected_records is optional and only ever used in "What's not
+    included" — see populate_cpc_template."""
     style_block = _load_brief_css(css_path)
     header_html = _render_header(context, analyst_name, decision, generated_date, snapshot_date)
-    context_html = _render_context_section(context, exceptions)
+    context_html = _render_context_section(context, exceptions, rejected_records)
     reading_html = (
         '<p class="reading">Comments show what some students experienced. They can help the group '
         "decide what to look into, but they don't show why a result happened.</p>"

@@ -139,6 +139,47 @@ def test_brief_contains_only_accepted_records(tmp_path):
     assert "S9" not in text
 
 
+def test_populate_cpc_template_lists_rejected_findings_in_whats_not_included(tmp_path):
+    rejected = _rejected_record()
+    rejected.reviewer_note = "Not enough context to raise this with the group."
+    path = populate_cpc_template(
+        accepted_records=[_accepted_record()],
+        context=_context(),
+        run_id="run-1",
+        data_version="abc123",
+        instruction_version="1.0.0",
+        generated_date="2026-09-24",
+        snapshot_date="2025-12-31",
+        exceptions={"exclusions": [], "quarantined": [], "limitations": []},
+        output_dir=tmp_path,
+        rejected_records=[rejected],
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "S9" in text
+    assert "Assessment clarity satisfaction (Online)" in text
+    assert "Not enough context to raise this with the group." in text
+    assert "rejected" in text.lower()
+    # Still never rendered as a signal in the table/feedback sections — only
+    # named in "What's not included".
+    assert "FB999" not in text
+
+
+def test_populate_cpc_template_without_rejected_records_has_no_rejected_mention(tmp_path):
+    path = populate_cpc_template(
+        accepted_records=[_accepted_record()],
+        context=_context(),
+        run_id="run-1",
+        data_version="abc123",
+        instruction_version="1.0.0",
+        generated_date="2026-09-24",
+        snapshot_date="2025-12-31",
+        exceptions={"exclusions": [], "quarantined": [], "limitations": []},
+        output_dir=tmp_path,
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "rejected" not in text.lower()
+
+
 def test_brief_contains_no_forbidden_strings(tmp_path):
     forbidden = [
         "Daniel Hughes",
@@ -243,8 +284,10 @@ def test_populate_cpc_template_removes_bracket_placeholder_lines(tmp_path):
     ]
     for placeholder in placeholder_lines:
         assert placeholder not in text
-    # The real content that replaced each placeholder is still present.
-    assert "Files used: course_metrics.csv" in text
+    # The real content that replaced each placeholder is still present,
+    # with sources described in plain language, not literal filenames.
+    assert "Sources used: course enrolment and withdrawal records" in text
+    assert "course_metrics.csv" not in text.split("## 1. Scope and sources")[1].split("## 2.")[0]
     assert "Excluded Region C from course_metrics.csv." in text
     assert "What support or delivery conditions" in text
 
@@ -264,6 +307,48 @@ def test_populate_cpc_template_uses_readable_measure_labels(tmp_path):
     text = path.read_text(encoding="utf-8")
     assert "Teacher support satisfaction (Online)" in text
     assert "teacher_support (Online)" not in text  # raw code name must not appear in the brief
+
+
+def test_populate_cpc_template_describes_sources_in_plain_language_not_filenames(tmp_path):
+    path = populate_cpc_template(
+        accepted_records=[_accepted_record()],
+        context=_context(),
+        run_id="run-1",
+        data_version="abc123",
+        instruction_version="1.0.0",
+        generated_date="2026-09-24",
+        snapshot_date="2025-12-31",
+        exceptions={"exclusions": [], "quarantined": [], "limitations": []},
+        output_dir=tmp_path,
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "Sources used: course enrolment and withdrawal records, learner satisfaction survey results" in text
+    assert "unit enrolment and completion records" in text
+    assert "learner feedback comments" in text
+    assert "learner satisfaction survey results" in text  # per-signal Source column too
+    assert ".csv" not in text  # no literal filename leaks into the brief anywhere
+
+
+def test_signal_table_row_strips_the_technical_n_threshold_fragment(tmp_path):
+    record = _accepted_record()
+    record.comparison_rule = "11 points below organisation average (72%, 2025); n=380 ≥ 30"
+    path = populate_cpc_template(
+        accepted_records=[record],
+        context=_context(),
+        run_id="run-1",
+        data_version="abc123",
+        instruction_version="1.0.0",
+        generated_date="2026-09-24",
+        snapshot_date="2025-12-31",
+        exceptions={"exclusions": [], "quarantined": [], "limitations": []},
+        output_dir=tmp_path,
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "11 points below organisation average (72%, 2025)" in text
+    # "n=380" legitimately appears elsewhere (calculation, source/period/n
+    # column) — only the rule's own "; n=380 ≥ 30" eligibility clause goes.
+    assert "n=380 ≥ 30" not in text
+    assert "≥ 30" not in text
 
 
 def test_evidence_records_json_keeps_code_names_even_when_brief_is_readable():
@@ -556,6 +641,82 @@ def test_populate_cpc_template_shows_plain_language_summary_not_technical_detail
     assert "delivery_region=Region C" not in text
 
 
+def test_render_brief_html_lists_rejected_findings_in_whats_not_included(tmp_path):
+    rejected = _rejected_record()
+    rejected.reviewer_note = "Not enough context to raise this with the group."
+    path = render_brief_html(
+        accepted_records=[_accepted_record()],
+        context=_context(),
+        run_id="run-1",
+        data_version="abc123",
+        generated_date="2026-09-24",
+        snapshot_date="2025-12-31",
+        exceptions={"exclusions": [], "quarantined": [], "limitations": []},
+        analyst_name="Farley Dahl",
+        decision="approve",
+        comments_by_id=_comments_by_id(),
+        output_dir=tmp_path,
+        rejected_records=[rejected],
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "S9" in text
+    assert "Assessment clarity satisfaction (Online)" in text
+    assert "Not enough context to raise this with the group." in text
+    # A rejected finding is still never rendered as its own signal article.
+    assert "FB999" not in text
+    assert text.count('<article class="signal">') == 1
+
+
+def test_render_brief_html_describes_sources_in_plain_language_not_filenames(tmp_path):
+    path = _render_html(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    assert "Figures come from" in text
+    assert "learner satisfaction survey results" in text
+    assert ".csv" not in text
+
+
+def test_render_measure_column_strips_the_technical_n_threshold_fragment(tmp_path):
+    record = _accepted_record()
+    record.comparison_rule = "11 points below organisation average (72%, 2025); n=380 ≥ 30"
+    path = _render_html(tmp_path, accepted=[record])
+    text = path.read_text(encoding="utf-8")
+    assert "11 points below organisation average (72%, 2025)" in text
+    # "n=380" legitimately appears elsewhere (the measure id line) — only
+    # the rule div's own "; n=380 ≥ 30" clause is stripped.
+    rule_div = text[text.index('<div class="rule">') : text.index("</div>", text.index('<div class="rule">'))]
+    assert "n=380" not in rule_div
+    assert "≥ 30" not in rule_div
+
+
+def test_plain_rule_text_only_strips_a_trailing_n_threshold_clause():
+    from cpc_agent.brief import _plain_rule_text
+
+    assert _plain_rule_text("11 points below average (72%); n=380 ≥ 30") == "11 points below average (72%)"
+    # No trailing n-clause (unit/segment withdrawal rules never have one) -> unchanged.
+    unit_rule = "≥20% and ≥1.5× median unit withdrawal rate (12.49%)"
+    assert _plain_rule_text(unit_rule) == unit_rule
+
+
+def test_render_brief_html_shows_ambiguous_note_next_to_its_excerpt(tmp_path):
+    record = _accepted_record()
+    record.ambiguous_links = {"FB003": "Could also be about assessment turnaround, not teacher support."}
+    path = _render_html(tmp_path, accepted=[record])
+    text = path.read_text(encoding="utf-8")
+    assert "Ambiguous: Could also be about assessment turnaround, not teacher support." in text
+    # FB007 is also an excerpt on the same finding but was not flagged ambiguous.
+    fb007_index = text.index("Hard to get help when you study online")
+    next_blockquote = text.index("<blockquote", fb007_index + 1) if "<blockquote" in text[fb007_index:] else len(text)
+    assert "Ambiguous" not in text[fb007_index:next_blockquote]
+
+
+def test_render_brief_html_omits_ambiguous_note_when_none_recorded(tmp_path):
+    path = _render_html(tmp_path)  # default record has no ambiguous_links
+    text = path.read_text(encoding="utf-8")
+    body = text[text.index("</style>") :]  # the CSS itself defines the .ambiguous-note class
+    assert "Ambiguous:" not in body
+    assert "ambiguous-note" not in body
+
+
 def test_render_brief_html_has_no_external_resources(tmp_path):
     path = _render_html(tmp_path)
     text = path.read_text(encoding="utf-8")
@@ -571,18 +732,18 @@ def test_render_brief_html_has_no_external_resources(tmp_path):
     assert "Georgia" in text
 
 
-def test_render_brief_html_shows_automatic_excerpt_selection_label(tmp_path):
+def test_render_brief_html_never_shows_excerpt_selection_label(tmp_path):
+    # "Excerpts: automatic selection (first two by ID)." / "Excerpts: analyst
+    # selection." used to be printed under each evidence column — dropped
+    # from the brief (a workshop audience has no use for it); the field
+    # itself still lives on the record for evidence_records.json.
     record = _accepted_record()  # excerpt fields default to automatic selection
     path = _render_html(tmp_path, accepted=[record])
     text = path.read_text(encoding="utf-8")
-    assert "Excerpts: automatic selection (first two by ID)." in text
+    assert "Excerpts:" not in text
+    assert record.aligned_excerpt_selection == "automatic selection (first two by ID)"
 
-
-def test_render_brief_html_shows_analyst_excerpt_selection_label(tmp_path):
-    record = _accepted_record()
     record.aligned_excerpt_selection = "analyst selection"
-    path = _render_html(tmp_path, accepted=[record])
-    text = path.read_text(encoding="utf-8")
-    assert "Excerpts: analyst selection." in text
-    # The countervailing side wasn't touched by the analyst in this record's fixture default.
-    assert "Excerpts: automatic selection (first two by ID)." in text
+    path2 = _render_html(tmp_path / "other", accepted=[record])
+    text2 = path2.read_text(encoding="utf-8")
+    assert "Excerpts:" not in text2

@@ -1,6 +1,7 @@
 """Flask test-client tests for the review dashboard, with the OpenAI
 client replaced by a scripted fake (no network/API key needed)."""
 import json
+import re
 
 import pytest
 
@@ -201,6 +202,29 @@ def test_full_review_and_approve_flow(tmp_path):
     state = json.loads((tmp_path / run_id / "state.json").read_text(encoding="utf-8"))
     assert state["status"] == "approved"
     assert state["pending_gate"] is None
+
+
+def test_rejected_finding_is_listed_in_the_brief_whats_not_included(tmp_path):
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    run_id = _start_run(client)
+
+    resp = client.post(
+        f"/runs/{run_id}/review/S3",
+        data={"decision": "reject", "note": "Not directly relevant to this group's context."},
+    )
+    assert resp.status_code == 302
+    _accept_all(client, run_id, finding_ids=("S1", "S2", "S4"))
+
+    resp = client.post(f"/runs/{run_id}/approve", follow_redirects=False)
+    assert resp.status_code == 302
+
+    resp = client.get(f"/runs/{run_id}/brief.html")
+    assert b"S3" in resp.data
+    assert b"Not directly relevant to this group's context." in resp.data
+    assert b"rejected" in resp.data.lower()
+    # S3 was still never rendered as its own accepted signal article.
+    assert len(re.findall(rb'<article class="signal">', resp.data)) == 3
 
 
 def test_review_page_flags_ambiguous_links(tmp_path):
@@ -456,6 +480,45 @@ def test_review_with_invalid_decision_value_is_rejected(tmp_path):
     assert s1["reviewer_status"] == "Pending"
 
 
+@pytest.mark.parametrize("decision", ["edit", "reject"])
+def test_review_with_blank_note_is_rejected_for_edit_and_reject(tmp_path, decision):
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    run_id = _start_run(client)
+
+    resp = client.post(f"/runs/{run_id}/review/S1", data={"decision": decision, "note": "   "})
+    assert resp.status_code == 409
+    records = json.loads((tmp_path / run_id / "evidence_records.json").read_text(encoding="utf-8"))
+    s1 = next(r for r in records if r["finding_id"] == "S1")
+    assert s1["reviewer_status"] == "Pending"  # never partially applied
+
+
+@pytest.mark.parametrize("decision", ["edit", "reject"])
+def test_review_with_a_real_note_succeeds_for_edit_and_reject(tmp_path, decision):
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    run_id = _start_run(client)
+
+    resp = client.post(f"/runs/{run_id}/review/S1", data={"decision": decision, "note": "Needs a closer look."})
+    assert resp.status_code == 302
+    records = json.loads((tmp_path / run_id / "evidence_records.json").read_text(encoding="utf-8"))
+    s1 = next(r for r in records if r["finding_id"] == "S1")
+    assert s1["reviewer_status"] == decision
+    assert s1["reviewer_note"] == "Needs a closer look."
+
+
+def test_review_accept_never_requires_a_note(tmp_path):
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    run_id = _start_run(client)
+
+    resp = client.post(f"/runs/{run_id}/review/S1", data={"decision": "accept", "note": ""})
+    assert resp.status_code == 302
+    records = json.loads((tmp_path / run_id / "evidence_records.json").read_text(encoding="utf-8"))
+    s1 = next(r for r in records if r["finding_id"] == "S1")
+    assert s1["reviewer_status"] == "accept"
+
+
 def test_approve_on_unknown_run_is_404(tmp_path):
     app = _make_app(tmp_path)
     client = app.test_client()
@@ -503,6 +566,23 @@ def test_excerpt_ids_not_actually_linked_are_dropped(tmp_path):
     records = json.loads((tmp_path / run_id / "evidence_records.json").read_text(encoding="utf-8"))
     s1 = next(r for r in records if r["finding_id"] == "S1")
     assert s1["aligned_excerpt_ids"] == ["FB003"]
+
+
+def test_excerpt_selection_is_none_when_no_comments_are_linked(tmp_path):
+    # S3 has no aligned/countervailing links at all (COMPLETE_SCRIPT calls
+    # note_no_evidence for it) — "none" is distinct from "automatic
+    # selection", which implies a default was applied to real candidates.
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    run_id = _start_run(client)
+
+    resp = client.post(f"/runs/{run_id}/review/S3", data={"decision": "accept", "note": ""})
+    assert resp.status_code == 302
+
+    records = json.loads((tmp_path / run_id / "evidence_records.json").read_text(encoding="utf-8"))
+    s3 = next(r for r in records if r["finding_id"] == "S3")
+    assert s3["aligned_excerpt_selection"] == "none"
+    assert s3["countervailing_excerpt_selection"] == "none"
 
 
 # --- agent activity is built only from real audit events --------------------

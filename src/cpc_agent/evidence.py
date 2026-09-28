@@ -20,6 +20,7 @@ NO_QUALITATIVE_EVIDENCE = "No qualitative evidence"
 
 AUTOMATIC_EXCERPT_SELECTION = "automatic selection (first two by ID)"
 ANALYST_EXCERPT_SELECTION = "analyst selection"
+NO_LINKED_COMMENTS_SELECTION = "none"
 
 
 def assign_evidence_status(

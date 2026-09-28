@@ -326,6 +326,7 @@ def run_pipeline(
     gates.audit = log  # prep's AuditLog was closed after prepare_run_for_review; point at the reopened one
     reviewed = gates.review_findings(prep.evidence_records, prep.comments_by_id)
     accepted = [r for r in reviewed if r.reviewer_status in ("accept", "edit")]
+    rejected = [r for r in reviewed if r.reviewer_status == "reject"]
 
     generated_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     brief_path = populate_cpc_template(
@@ -339,6 +340,7 @@ def run_pipeline(
         prep.exceptions,
         log.run_dir,
         analyst_name=gates.analyst_name,
+        rejected_records=rejected,
     )
     log.log_event("brief_written", path=str(brief_path))
 
@@ -357,6 +359,7 @@ def run_pipeline(
         decision,
         prep.comments_by_id,
         log.run_dir,
+        rejected_records=rejected,
     )
     log.log_event("brief_html_written", path=str(html_path))
 

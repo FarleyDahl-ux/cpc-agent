@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from cpc_agent.evidence import EvidenceRecord
-from cpc_agent.gates import Gates, MAX_EXCERPTS, _default_excerpts, _resolve_excerpts
+from cpc_agent.gates import Gates, MAX_EXCERPTS, _default_excerpts, _excerpt_selection_label, _resolve_excerpts
 from cpc_agent.screening import EligibleComment
 from cpc_agent.validation import BlankValueIssue, LowSampleIssue
 
@@ -356,3 +358,128 @@ def test_findings_review_audit_log_records_excerpt_selection(tmp_path):
     assert review_event["countervailing_excerpt_ids"] == ["FB005"]
     assert review_event["countervailing_excerpt_selection"] == "automatic selection (first two by ID)"
     assert review_event["analyst"] == "Farley Dahl"
+
+
+# --- excerpt selection: "none" when nothing was linked to select from ------
+
+
+def test_excerpt_selection_label_is_none_when_nothing_was_linked():
+    assert _excerpt_selection_label(True, []) == "none"
+    assert _excerpt_selection_label(False, []) == "none"
+
+
+def test_excerpt_selection_label_is_automatic_or_analyst_when_something_was_linked():
+    assert _excerpt_selection_label(True, ["FB003"]) == "automatic selection (first two by ID)"
+    assert _excerpt_selection_label(False, ["FB003"]) == "analyst selection"
+
+
+def test_scripted_findings_review_excerpt_selection_is_none_for_an_empty_side(tmp_path):
+    path = _write_answers(tmp_path, {"findings_review": {"default": "accept"}})
+    gates = Gates(str(path))
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+        aligned_ids=["FB003"], countervailing_ids=[],
+    )
+    reviewed = gates.review_findings([record])
+    assert reviewed[0].aligned_excerpt_selection == "automatic selection (first two by ID)"
+    assert reviewed[0].countervailing_excerpt_selection == "none"
+
+
+# --- a note is required for "edit" and "reject" -----------------------------
+
+
+def test_scripted_findings_review_reject_without_note_raises(tmp_path):
+    path = _write_answers(tmp_path, {"findings_review": {"S1": {"decision": "reject"}}})
+    gates = Gates(str(path))
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+    )
+    with pytest.raises(ValueError, match="note is required"):
+        gates.review_findings([record])
+
+
+def test_scripted_findings_review_edit_without_note_raises(tmp_path):
+    path = _write_answers(tmp_path, {"findings_review": {"S1": {"decision": "edit", "note": "   "}}})
+    gates = Gates(str(path))
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+    )
+    with pytest.raises(ValueError, match="note is required"):
+        gates.review_findings([record])
+
+
+def test_scripted_findings_review_reject_with_note_succeeds(tmp_path):
+    path = _write_answers(
+        tmp_path, {"findings_review": {"S1": {"decision": "reject", "note": "Not enough context to raise this."}}}
+    )
+    gates = Gates(str(path))
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+    )
+    reviewed = gates.review_findings([record])
+    assert reviewed[0].reviewer_status == "reject"
+    assert reviewed[0].reviewer_note == "Not enough context to raise this."
+
+
+def test_scripted_findings_review_accept_never_requires_a_note(tmp_path):
+    path = _write_answers(tmp_path, {"findings_review": {"default": "accept"}})
+    gates = Gates(str(path))
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+    )
+    reviewed = gates.review_findings([record])  # must not raise
+    assert reviewed[0].reviewer_status == "accept"
+    assert reviewed[0].reviewer_note == ""
+
+
+def test_interactive_findings_review_reject_prompts_until_note_given(monkeypatch):
+    gates = Gates(answers_path=None)
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+    )
+    # decision, then two blank note attempts, then a real one; then the two
+    # excerpt prompts (no linked comments -> _choose_excerpts_interactively
+    # short-circuits without prompting, so only these four inputs are used).
+    answers = iter(["reject", "", "  ", "Rejected: not directly about this measure."])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    reviewed = gates.review_findings([record], comments_by_id={})
+
+    assert reviewed[0].reviewer_status == "reject"
+    assert reviewed[0].reviewer_note == "Rejected: not directly about this measure."
+
+
+def test_interactive_findings_review_edit_prompts_until_note_given(monkeypatch):
+    gates = Gates(answers_path=None)
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+    )
+    answers = iter(["edit", "", "Needs a caveat about timing."])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    reviewed = gates.review_findings([record], comments_by_id={})
+
+    assert reviewed[0].reviewer_status == "edit"
+    assert reviewed[0].reviewer_note == "Needs a caveat about timing."
+
+
+def test_interactive_findings_review_accept_never_prompts_for_a_note(monkeypatch):
+    gates = Gates(answers_path=None)
+    record = EvidenceRecord(
+        finding_id="S1", measure="teacher_support", segment="Online", calculation="c", comparison_rule="r",
+        source_file="satisfaction.csv", period="2025", n=380,
+    )
+    answers = iter(["accept"])  # only one answer available: would raise StopIteration if a note were prompted for
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    reviewed = gates.review_findings([record], comments_by_id={})
+
+    assert reviewed[0].reviewer_status == "accept"
+    assert reviewed[0].reviewer_note == ""
