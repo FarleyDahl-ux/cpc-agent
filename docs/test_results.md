@@ -331,6 +331,85 @@ All 5 runs' `brief.md`, `brief.html`, `evidence_records.json`,
 `tests/fixtures/expected_results.json` and `answer_key.md` were not
 edited to match these results.
 
+## Plan-first gating, ambiguous links, retention, workflow summary
+
+Four independent additions in this round: (1) `submit_plan`/`revise_plan`
+gate `search_comments` and are logged to the audit trail the moment they
+succeed, replacing the old end-of-run `investigation_plan` summary; (2)
+`record_link` accepts an optional `ambiguous`/`ambiguous_note`, surfaced in
+`evidence_records.json` and the dashboard's review page; (3) comment text
+(`eligible_comments.json`) is deleted from a run folder immediately after
+its final approval/return decision, with `brief.html` re-rendered so its
+embedded excerpts fall back to a placeholder, and a separate
+`--purge-older-than-days`/`--dry-run` CLI sweep deletes whole old run
+folders, logged to a central `runs/retention_log.jsonl`; (4) a workflow
+summary panel (goal, sources used, confirmed facts, outstanding
+uncertainty, approvals still required) was added to the dashboard's Agent
+Activity tab, built only from the run's own record. Full reasoning for
+every judgement call is in `docs/decisions.md` under "Plan-first
+investigation gating", "Ambiguous links", "Comment-text retention" and
+"Workflow summary panel".
+
+`pytest` (deterministic suite): **189 passed, 3 deselected** (up from 168
+at the end of the previous round — 27 new tests: `tests/test_retention.py`
+plus additions to `tests/test_investigate.py`, `tests/test_evidence.py`,
+`tests/test_pipeline.py`, `tests/test_webapp.py`). `pytest -m integration`
+(real API): **3 passed** — `test_real_investigation_loop_completes_and_stays_within_bounds`
+was updated for the new plan-gated tool contract and confirms a real run
+submits a plan covering every signal before any search succeeds.
+
+### Five-run live comparison (`scripts/live_comparison.py --runs 5`)
+
+Real API, after this round's changes:
+
+```
+S1 (teacher_support, Online): found 5/5; evidence_status == answer key 5/5; aligned_ids exact match 1/5 (expected aligned IDs fully recovered 1/5); countervailing_ids exact match 0/5
+S2 (assessment_clarity, Online): found 5/5; evidence_status == answer key 5/5; aligned_ids exact match 5/5 (expected aligned IDs fully recovered 5/5); countervailing_ids exact match 5/5
+S3 (unit_withdrawal_rate, CWSU204): found 5/5; evidence_status == answer key 5/5; aligned_ids exact match 5/5 (expected aligned IDs fully recovered 5/5); countervailing_ids exact match 5/5
+S4 (segment_withdrawal_rate, Online): found 5/5; evidence_status == answer key 2/5; aligned_ids exact match 2/5 (expected aligned IDs fully recovered 2/5); countervailing_ids exact match 2/5
+```
+
+S2 and S3 stayed at a clean 5/5 sweep, consistent with every prior round.
+S1's evidence status matched the answer key in all 5 runs even though its
+countervailing ID set matched exactly in none — every run correctly
+recorded FB005 as countervailing (giving the right "Mixed" status), but
+none also recorded FB019, the second expected countervailing comment; the
+same keyword-discoverability limitation documented in the "Genuinely
+iterative investigation" round above, not a new regression from this
+round's four features. S4's mixed 2/5 is the same long-standing, already-
+documented FB024 boundary case (see that same section): across the 5 runs
+FB024 was classified aligned twice and countervailing three times — a
+comment `answer_key.md`'s own commentary already flags as debatable.
+
+What's genuinely new in this round, and worth noting rather than folding
+silently into the numbers above: **every one of the 5 runs independently
+set `record_link`'s `ambiguous` flag on FB024**, each with its own short
+note (e.g. *"The learner describes a near-withdrawal, not a confirmed
+withdrawal, so its relationship to the measured withdrawal rate is
+uncertain."*) — regardless of which direction it ultimately linked FB024
+to. This is the ambiguous-link feature working exactly as intended: the
+model correctly identifies the same boundary case `answer_key.md` itself
+calls out, and flags it for a human reviewer instead of silently picking a
+side. The flag doesn't change `evidence_status` (by design — see
+`docs/decisions.md`), so it doesn't move S4's numbers above, but it's the
+first real-model evidence that this round's flag targets a genuine,
+recurring source of classification disagreement rather than a hypothetical
+one. Two of the five runs also called `revise_plan` at least once, mid-
+investigation, with a stated reason each time — confirmed by inspecting
+`investigation_plan_revision` events directly, not just their count.
+
+Verified directly against all 5 real run folders (not just inferred from
+the summary table): every `evidence_records.json`/`exception_log.json`/
+`audit_log.jsonl`/`brief.md`/`brief.html` was scanned for every
+`forbidden_output_strings` entry — clean in all 5. Every run's
+`eligible_comments.json` was gone after the run completed, with a matching
+`retention_purge` event in that run's `audit_log.jsonl` — retention fired
+correctly on every real run, not only in the mocked-client tests. Every
+run submitted exactly one initial plan covering all four signals before
+its first successful search (`investigation_plan` event present, one per
+run). `tests/fixtures/expected_results.json` and `answer_key.md` were not
+edited to match any of this.
+
 ## A note on `tests/fixtures/answer_key.md`'s closing remark
 
 The answer key's final note ("Copilot calculations are LLM-performed, not a
@@ -344,13 +423,16 @@ not proposed.
 
 ## Definition of done (CLAUDE.md §11)
 
-- `pytest` passes: 133 passed, 3 deselected (the real-API integration
+- `pytest` passes: 189 passed, 3 deselected (the real-API integration
   tests) as of the most recent round (up from 62 passed / 1 deselected at
   the end of phase 6 — see the sections above for what each later round
-  added).
+  added). All 3 deselected integration tests pass when run explicitly
+  (`pytest -m integration`).
 - `python -m cpc_agent.main --answers examples/demo_answers.json` produces
   all five outputs (`evidence_records.json`, `exception_log.json`,
   `audit_log.jsonl`, `brief.md`, `brief.html`) — confirmed against the
   real OpenAI API repeatedly, most recently as part of the 5-run live
-  comparison above.
+  comparison above. `eligible_comments.json` is also produced, then
+  deleted again once the run's final decision is recorded (see
+  "Comment-text retention" in `docs/decisions.md`).
 - README explains setup, running, and what's implemented vs proposed.
