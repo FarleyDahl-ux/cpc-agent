@@ -496,6 +496,43 @@ def test_revise_plan_replaces_the_plan_and_counts_revisions():
     tools.search_comments(signal_id=signals[0].id, direction="aligned", reason="r", delivery_mode="Online")
 
 
+def test_ambiguous_record_link_requires_a_note():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    with pytest.raises(ToolError):
+        tools.record_link("S1", "FB003", "aligned", "Teacher responsiveness and support", "note", ambiguous=True)
+
+
+def test_ambiguous_record_link_is_recorded_and_retrievable():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    result = tools.record_link(
+        "S1", "FB003", "aligned", "Teacher responsiveness and support", "note",
+        ambiguous=True, ambiguous_note="Could also be about assessment turnaround, not teacher support.",
+    )
+    assert result["ambiguous"] is True
+    assert tools.ambiguous_links("S1") == {"FB003": "Could also be about assessment turnaround, not teacher support."}
+
+
+def test_non_ambiguous_record_link_is_not_in_ambiguous_links():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    tools.record_link("S1", "FB003", "aligned", "Teacher responsiveness and support", "note")
+    assert tools.ambiguous_links("S1") == {}
+
+
+def test_moving_an_ambiguous_link_to_a_clean_relation_clears_ambiguity():
+    signals, comments = _signals_and_comments()
+    tools = InvestigationTools(signals=signals, eligible_comments=comments, ask_analyst_fn=lambda q: "n/a")
+    tools.record_link(
+        "S1", "FB003", "aligned", "Teacher responsiveness and support", "note",
+        ambiguous=True, ambiguous_note="uncertain",
+    )
+    assert tools.ambiguous_links("S1") == {"FB003": "uncertain"}
+    tools.record_link("S1", "FB003", "countervailing", "Teacher responsiveness and support", "reclassified, no longer ambiguous")
+    assert tools.ambiguous_links("S1") == {}
+
+
 # --- run_investigation orchestration (mocked client) ----------------------
 
 

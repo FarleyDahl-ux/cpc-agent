@@ -79,6 +79,7 @@ class EvidenceRecord:
     countervailing_excerpt_ids: list[str] = field(default_factory=list)
     aligned_excerpt_selection: str = AUTOMATIC_EXCERPT_SELECTION
     countervailing_excerpt_selection: str = AUTOMATIC_EXCERPT_SELECTION
+    ambiguous_links: dict[str, str] = field(default_factory=dict)  # comment_id -> a short note explaining the uncertainty
     themes: list[str] = field(default_factory=list)
     evidence_status: str = ""
     limitation: str = ""
@@ -118,6 +119,7 @@ def build_evidence_record(
     themes: list[str],
     review_required_reason: str | None = None,
     extra_limitation: str = "",
+    ambiguous_links: dict[str, str] | None = None,
 ) -> EvidenceRecord:
     status = assign_evidence_status(aligned_ids, countervailing_ids, review_required_reason)
     limitation = review_required_reason if status == REVIEW_REQUIRED else _DEFAULT_LIMITATIONS[status]
@@ -136,6 +138,7 @@ def build_evidence_record(
         details=dict(signal.details),
         aligned_ids=sorted(set(aligned_ids)),
         countervailing_ids=sorted(set(countervailing_ids)),
+        ambiguous_links=dict(ambiguous_links or {}),
         themes=sorted(set(themes)),
         evidence_status=status,
         limitation=limitation,

@@ -79,6 +79,9 @@ h2 { font-size:15px; color:var(--ink); margin:0 0 10px; }
 .c .id { display:block; font-size:11.5px; color:var(--muted); }
 .c input { margin-top:3px; accent-color:var(--human); }
 .excerpt-hint { font-size:12px; color:var(--muted); margin-top:4px; }
+.c.ambig { background:var(--human-soft); border:1px solid var(--human-line); }
+.ambig-badge { display:inline-block; font-size:11px; font-weight:600; color:var(--human); background:#fff; border:1px solid var(--human-line); border-radius:999px; padding:0 7px; margin-left:6px; }
+.ambig-note { display:block; font-size:12px; color:var(--human); margin-top:2px; }
 .decide { display:flex; gap:8px; align-items:center; margin-top:12px; padding-top:12px; border-top:1px dashed var(--rule); flex-wrap:wrap; }
 .decide .who { font-size:12.5px; color:var(--human); margin-right:auto; }
 .btn { border-radius:8px; padding:6px 14px; border:1px solid var(--rule); background:#fff; color:var(--ink); }

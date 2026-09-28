@@ -102,3 +102,22 @@ def test_humanize_measure_keeps_code_name_unchanged_in_records(signals_by_measur
     assert record.measure == "teacher_support"
     assert humanize_measure(record.measure) == "teacher support"
     assert record.to_dict()["measure"] == "teacher_support"
+
+
+def test_build_evidence_record_defaults_to_no_ambiguous_links(signals_by_measure_segment):
+    signal = signals_by_measure_segment[("teacher_support", "Online")]
+    record = build_evidence_record(signal, aligned_ids=["FB003"], countervailing_ids=[], themes=[])
+    assert record.ambiguous_links == {}
+
+
+def test_build_evidence_record_carries_ambiguous_links_through_to_dict(signals_by_measure_segment):
+    signal = signals_by_measure_segment[("teacher_support", "Online")]
+    record = build_evidence_record(
+        signal,
+        aligned_ids=["FB003"],
+        countervailing_ids=[],
+        themes=[],
+        ambiguous_links={"FB003": "Could plausibly be about something else."},
+    )
+    assert record.ambiguous_links == {"FB003": "Could plausibly be about something else."}
+    assert record.to_dict()["ambiguous_links"] == {"FB003": "Could plausibly be about something else."}

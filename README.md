@@ -24,6 +24,8 @@ Each run writes to `runs/<run_id>/`: `evidence_records.json`, `exception_log.jso
 
 Before the model can search any feedback, it must call `submit_plan`: a one/two-sentence goal plus, for every flagged signal, its intended search approach in both directions (aligned and countervailing). `search_comments` is rejected until a plan exists, and the plan (and any later `revise_plan` call, which requires a short reason) is written to `audit_log.jsonl` — as its own `investigation_plan`/`investigation_plan_revision` event — the moment it's submitted, not reconstructed afterwards.
 
+When the model links a comment to a signal but the reading is genuinely uncertain, it can set `record_link`'s `ambiguous` flag with a short `ambiguous_note` explaining why, instead of silently dropping the link or forcing a confident classification. The link still counts normally for evidence status; the flag and note are carried into `evidence_records.json` (`ambiguous_links`) and shown as an "Ambiguous" badge on the dashboard's review page, for a reviewer to look at more closely.
+
 ## Review dashboard
 
 A local, single-user web dashboard for the human gates, built on `docs/dashboard_mockup.html`'s design:

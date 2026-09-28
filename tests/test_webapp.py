@@ -84,8 +84,20 @@ COMPLETE_SCRIPT = [
     ("search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "r", "keywords": ["detailed"]}),
     *[
         ("record_link", {"signal_id": "S1", "comment_id": cid, "relation": "aligned", "theme": "Teacher responsiveness and support", "rationale": "reports a support gap"})
-        for cid in ("FB003", "FB007", "FB011", "FB015")
+        for cid in ("FB003", "FB007", "FB011")
     ],
+    (
+        "record_link",
+        {
+            "signal_id": "S1",
+            "comment_id": "FB015",
+            "relation": "aligned",
+            "theme": "Teacher responsiveness and support",
+            "rationale": "reports wanting set office hours",
+            "ambiguous": True,
+            "ambiguous_note": "Could be read as a general suggestion rather than a specific support complaint.",
+        },
+    ),
     *[
         ("record_link", {"signal_id": "S1", "comment_id": cid, "relation": "countervailing", "theme": "Teacher responsiveness and support", "rationale": "reports responsive teaching"})
         for cid in ("FB005", "FB019")
@@ -189,6 +201,23 @@ def test_full_review_and_approve_flow(tmp_path):
     state = json.loads((tmp_path / run_id / "state.json").read_text(encoding="utf-8"))
     assert state["status"] == "approved"
     assert state["pending_gate"] is None
+
+
+def test_review_page_flags_ambiguous_links(tmp_path):
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    run_id = _start_run(client)
+
+    resp = client.get(f"/runs/{run_id}/review")
+    assert resp.status_code == 200
+    assert b"Ambiguous" in resp.data
+    assert b"Could be read as a general suggestion rather than a specific support complaint." in resp.data
+
+    records = json.loads((tmp_path / run_id / "evidence_records.json").read_text(encoding="utf-8"))
+    s1 = next(r for r in records if r["finding_id"] == "S1")
+    assert s1["ambiguous_links"] == {
+        "FB015": "Could be read as a general suggestion rather than a specific support complaint."
+    }
 
 
 def test_return_for_revision_marks_returned_not_approved(tmp_path):

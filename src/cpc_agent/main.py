@@ -247,6 +247,7 @@ def prepare_run_for_review(
             countervailing_ids=investigation.countervailing_ids(signal.id),
             themes=investigation.themes(signal.id),
             extra_limitation=extra_limitation,
+            ambiguous_links=investigation.ambiguous_links(signal.id),
         )
         evidence_records.append(record)
         log.log_event("evidence_status", finding_id=signal.id, status=record.evidence_status)

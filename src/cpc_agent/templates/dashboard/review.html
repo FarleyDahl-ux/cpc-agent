@@ -13,16 +13,18 @@
         <h4>Consistent with this result ({{ r.aligned_ids|length }})</h4>
         {% for cid in r.aligned_ids %}
         {% set is_checked = cid in r.aligned_excerpt_ids if r.reviewer_status != 'Pending' else loop.index0 < 2 %}
-        <label class="c"><input type="checkbox" name="aligned_excerpt" value="{{ cid }}" {{ 'checked' if is_checked else '' }} data-side="aligned-{{ r.finding_id }}">
-          <span>{{ comments.get(cid, {}).get('text', '(comment text unavailable)') }}<span class="id">{{ cid }}</span></span></label>
+        {% set ambig_note = r.ambiguous_links.get(cid) %}
+        <label class="c{{ ' ambig' if ambig_note else '' }}"><input type="checkbox" name="aligned_excerpt" value="{{ cid }}" {{ 'checked' if is_checked else '' }} data-side="aligned-{{ r.finding_id }}">
+          <span>{{ comments.get(cid, {}).get('text', '(comment text unavailable)') }}{% if ambig_note %}<span class="ambig-badge">Ambiguous</span>{% endif %}<span class="id">{{ cid }}</span>{% if ambig_note %}<span class="ambig-note">{{ ambig_note }}</span>{% endif %}</span></label>
         {% else %}<div class="none">None found</div>{% endfor %}
       </div>
       <div>
         <h4 class="o">Pointing the other way ({{ r.countervailing_ids|length }})</h4>
         {% for cid in r.countervailing_ids %}
         {% set is_checked = cid in r.countervailing_excerpt_ids if r.reviewer_status != 'Pending' else loop.index0 < 2 %}
-        <label class="c"><input type="checkbox" name="countervailing_excerpt" value="{{ cid }}" {{ 'checked' if is_checked else '' }} data-side="countervailing-{{ r.finding_id }}">
-          <span>{{ comments.get(cid, {}).get('text', '(comment text unavailable)') }}<span class="id">{{ cid }}</span></span></label>
+        {% set ambig_note = r.ambiguous_links.get(cid) %}
+        <label class="c{{ ' ambig' if ambig_note else '' }}"><input type="checkbox" name="countervailing_excerpt" value="{{ cid }}" {{ 'checked' if is_checked else '' }} data-side="countervailing-{{ r.finding_id }}">
+          <span>{{ comments.get(cid, {}).get('text', '(comment text unavailable)') }}{% if ambig_note %}<span class="ambig-badge">Ambiguous</span>{% endif %}<span class="id">{{ cid }}</span>{% if ambig_note %}<span class="ambig-note">{{ ambig_note }}</span>{% endif %}</span></label>
         {% else %}<div class="none">None found</div>{% endfor %}
       </div>
     </div>

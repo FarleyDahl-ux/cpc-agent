@@ -103,6 +103,14 @@ fine — just move on; you don't have to force a link. If nothing at all can
 be linked to a signal after searching both directions, call note_no_evidence
 with a brief reason.
 
+Some links are genuinely uncertain rather than clear-cut — the comment is
+plausibly relevant but the wording is ambiguous, or it could reasonably be
+read either way. When that's the case, still record it (don't just drop
+it), but set record_link's ambiguous flag to true and give a short
+ambiguous_note explaining the specific uncertainty. Do not use this to
+hedge on every link — only when there is a real, specific reason a human
+reviewer should look more closely at that one.
+
 A countervailing link is held to a stricter test than an aligned one: the
 comment must directly address and contradict the signal's specific measure,
 not just express general satisfaction or praise elsewhere. For a withdrawal-
@@ -300,6 +308,14 @@ TOOL_SPECS = [
                     "relation": {"type": "string", "enum": ["aligned", "countervailing"]},
                     "theme": {"type": "string", "enum": config.THEMES},
                     "rationale": {"type": "string", "description": "One line, no names, no causal claims."},
+                    "ambiguous": {
+                        "type": "boolean",
+                        "description": "Set true only when this specific link is genuinely uncertain and a human reviewer should look closely at it.",
+                    },
+                    "ambiguous_note": {
+                        "type": "string",
+                        "description": "Required when ambiguous is true: a short note explaining the specific uncertainty.",
+                    },
                 },
                 "required": ["signal_id", "comment_id", "relation", "theme", "rationale"],
                 "additionalProperties": False,
@@ -357,6 +373,8 @@ class Link:
     comment_id: str
     theme: str
     rationale: str
+    ambiguous: bool = False
+    ambiguous_note: str = ""
 
 
 @dataclass
@@ -543,7 +561,16 @@ class InvestigationTools:
         )
         return results
 
-    def record_link(self, signal_id: str, comment_id: str, relation: str, theme: str, rationale: str) -> dict:
+    def record_link(
+        self,
+        signal_id: str,
+        comment_id: str,
+        relation: str,
+        theme: str,
+        rationale: str,
+        ambiguous: bool = False,
+        ambiguous_note: str = "",
+    ) -> dict:
         if signal_id not in self.signals_by_id:
             raise ToolError(f"Unknown signal_id: {signal_id!r}")
         if comment_id not in self.comments_by_id:
@@ -554,12 +581,30 @@ class InvestigationTools:
             raise ToolError(f"theme must be one of {config.THEMES}, got {theme!r}")
         if not rationale or not str(rationale).strip():
             raise ToolError("rationale is required")
-        link = Link(comment_id=comment_id, theme=theme, rationale=rationale)
+        ambiguous = bool(ambiguous)
+        if ambiguous and not str(ambiguous_note or "").strip():
+            raise ToolError("ambiguous_note is required when ambiguous is true")
+        link = Link(
+            comment_id=comment_id,
+            theme=theme,
+            rationale=rationale,
+            ambiguous=ambiguous,
+            ambiguous_note=ambiguous_note if ambiguous else "",
+        )
         target = self.aligned if relation == "aligned" else self.countervailing
         other = self.countervailing if relation == "aligned" else self.aligned
         other[signal_id].pop(comment_id, None)
         target[signal_id][comment_id] = link
-        return {"status": "recorded", "signal_id": signal_id, "comment_id": comment_id, "relation": relation}
+        result = {"status": "recorded", "signal_id": signal_id, "comment_id": comment_id, "relation": relation}
+        if ambiguous:
+            result["ambiguous"] = True
+        return result
+
+    def ambiguous_links(self, signal_id: str) -> dict[str, str]:
+        """comment_id -> ambiguous_note, for every link (either direction)
+        on this signal that was recorded as ambiguous."""
+        links = {**self.aligned.get(signal_id, {}), **self.countervailing.get(signal_id, {})}
+        return {cid: link.ambiguous_note for cid, link in links.items() if link.ambiguous}
 
     def note_no_evidence(self, signal_id: str, reason: str) -> dict:
         if signal_id not in self.signals_by_id:
@@ -666,10 +711,16 @@ def _execute_tool(tools: InvestigationTools, name: str, args: dict) -> object:
         return tools.search_comments(**args)
     if name == "record_link":
         required = {"signal_id", "comment_id", "relation", "theme", "rationale"}
+        optional = {"ambiguous", "ambiguous_note"}
         missing = required - set(args)
         if missing:
             raise ToolError(f"record_link missing arguments: {sorted(missing)}")
-        return tools.record_link(**{k: args[k] for k in required})
+        extra = set(args) - required - optional
+        if extra:
+            raise ToolError(f"record_link got unexpected arguments: {sorted(extra)}")
+        call_args = {k: args[k] for k in required}
+        call_args.update({k: args[k] for k in optional if k in args})
+        return tools.record_link(**call_args)
     if name == "note_no_evidence":
         required = {"signal_id", "reason"}
         missing = required - set(args)

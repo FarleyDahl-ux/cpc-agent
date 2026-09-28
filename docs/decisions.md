@@ -758,3 +758,47 @@ chosen and recorded here.
   event, so without this exclusion the same action would appear as both
   "Called submit_plan" and "Submitted an investigation plan" back to
   back.
+
+## Ambiguous links
+
+- **`record_link` gains an optional `ambiguous` flag with a required
+  `ambiguous_note` when set, rather than a third relation value (e.g.
+  `"ambiguous"`) alongside `"aligned"`/`"countervailing"`.** The
+  evidence-status precedence rule (Mixed/Sufficient/Limited/No
+  qualitative evidence) is defined entirely in terms of aligned vs.
+  countervailing counts; a link is still, structurally, one or the other
+  — "ambiguous" describes the *model's confidence in its own
+  classification*, not a third kind of relationship the finding can have
+  to a comment. Keeping it as an orthogonal flag means
+  `assign_evidence_status` needs no changes at all, and a reviewer editing
+  the note later isn't reclassifying evidence, just annotating it.
+- **`ambiguous_note` is required whenever `ambiguous=True`, and cleared
+  whenever it's false** (`record_link` raises `ToolError` on
+  `ambiguous=True` with a blank/missing note; `Link.ambiguous_note` is
+  reset to `""` when a comment is re-linked without the flag). An
+  ambiguous flag with no explanation would tell a reviewer *that*
+  something's uncertain but not *what* to look at, which is worse than
+  useful — it just adds a badge to click past. The system prompt is
+  correspondingly explicit that this isn't a hedge to apply broadly: "only
+  when there is a real, specific reason a human reviewer should look more
+  closely at that one."
+- **`InvestigationTools.ambiguous_links(signal_id)` returns a plain
+  `{comment_id: note}` dict, not a richer structure carrying direction or
+  theme** — `EvidenceRecord.ambiguous_links` (and therefore
+  `evidence_records.json`) only needs "which linked comment, and why is it
+  uncertain" to drive the dashboard badge; a comment's direction and theme
+  are already recoverable from `aligned_ids`/`countervailing_ids`/`themes`
+  on the same record, so duplicating them here would just be redundant
+  state that could drift from the link it's describing.
+- **The dashboard marks an ambiguous link with a badge and note on the
+  review page (`.ambig`/`.ambig-badge`/`.ambig-note` in
+  `dashboard.css`), but doesn't change how the checkbox/excerpt-selection
+  behaviour works for it.** An ambiguous link is still a real aligned or
+  countervailing link the model is standing behind (just flagging for a
+  closer look) — it isn't excluded from evidence, isn't pre-unchecked as
+  an excerpt candidate, and doesn't move the finding to "Review required"
+  (that status is reserved for unresolved privacy/demographic/data
+  conditions per CLAUDE.md's evidence-status precedence, a different kind
+  of unresolved-ness). The reviewer decides what to do with the flag the
+  same way they decide everything else at the findings review gate —
+  accept, edit a note, or reject.
