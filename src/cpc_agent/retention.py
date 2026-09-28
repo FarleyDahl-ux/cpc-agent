@@ -3,15 +3,17 @@
 Two independent mechanisms:
 
 - purge_comment_text(run_id, runs_dir): called once, immediately after a
-  run's final approval/return decision. Deletes eligible_comments.json —
-  the only file a run folder ever writes that holds raw comment text —
-  and is logged as its own event in that run's own audit_log.jsonl (still
-  present; only the comment text goes). IDs, counts, evidence records,
-  reviewer decisions and the audit log itself are all untouched. Callers
-  are responsible for re-rendering brief.html afterwards (see
-  main.run_pipeline / dashboard_state.finalize_run) so the excerpt
-  blockquotes it had already embedded don't keep surviving on disk as the
-  one other place comment text could linger.
+  run's final approval/return decision — a "return" closes the run just
+  like an "approve" does; revising means starting a new run, not
+  reopening this one. Deletes eligible_comments.json — the only *working*
+  file a run folder ever writes that holds raw comment text — and is
+  logged as its own event in that run's own audit_log.jsonl (still
+  present; only the comment text goes). brief.md and brief.html are
+  deliberately never touched: they are the approved workshop output,
+  excerpts included, and stay exactly as generated. IDs, counts, evidence
+  records, reviewer decisions and the audit log itself are all untouched
+  too. A whole run folder — brief included — is only ever removed by
+  purge_old_runs below, never by this function.
 
 - purge_old_runs(runs_dir, older_than_days): a CLI-triggered sweep
   (`--purge-older-than-days`) that deletes whole run folders once they

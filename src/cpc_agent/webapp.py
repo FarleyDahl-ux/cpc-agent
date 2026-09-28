@@ -160,7 +160,11 @@ def create_app(
         reviewed, total = dashboard_state.review_progress(records)
         brief_ready = total > 0 and reviewed == total
         accepted_count = sum(1 for r in records if r.get("reviewer_status") in ("accept", "edit"))
-        if brief_ready:
+        # Only regenerate while the run is still pending its final decision.
+        # Once approved/returned, brief.md/brief.html are the finalised
+        # workshop output (excerpts included) and are never rewritten again
+        # — in particular, never after retention deletes eligible_comments.json.
+        if brief_ready and state["status"] not in (dashboard_state.STATUS_APPROVED, dashboard_state.STATUS_RETURNED):
             dashboard_state.generate_brief_preview(run_id, _runs_dir())
         return _render_run_page("brief.html", state, "brief", brief_ready=brief_ready, accepted_count=accepted_count)
 

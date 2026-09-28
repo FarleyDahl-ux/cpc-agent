@@ -287,11 +287,18 @@ def test_comment_text_is_purged_after_final_decision(tmp_path, route, expected_s
     assert s1["aligned_ids"] == ["FB003", "FB007", "FB011", "FB015"]
     assert s1["reviewer_status"] == "accept"
 
-    # brief.html was re-rendered after the purge — no comment text remains
-    # in the run folder at all, on disk, once the final decision is made.
+    # brief.html is the approved workshop output and is never rewritten by
+    # retention — its excerpts (FB003's real text among them) stay exactly
+    # as generated, even though the working eligible_comments.json is gone.
     resp = client.get(f"/runs/{run_id}/brief.html")
-    assert b"waited over a week for a reply" not in resp.data  # FB003's actual text
-    assert b"(comment text unavailable)" in resp.data
+    assert b"waited over a week for a reply" in resp.data  # FB003's actual text
+
+    # Revisiting the brief tab after the final decision must not trigger a
+    # regeneration either (that used to strip the excerpt once the working
+    # file was gone) — the finalised brief is never touched again.
+    client.get(f"/runs/{run_id}/brief")
+    resp = client.get(f"/runs/{run_id}/brief.html")
+    assert b"waited over a week for a reply" in resp.data
 
 
 # --- quarantined content never reaches the browser --------------------------

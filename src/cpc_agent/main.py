@@ -368,15 +368,11 @@ def run_pipeline(
     log.log_event("run_end", status="completed", final_decision=decision)
     log.close()
 
-    purged, _ = retention.purge_comment_text(prep.run_id, runs_dir)
-    if purged:
-        # comments_by_id is now stale by design (the file it was read from
-        # is gone) — re-render so brief.html's already-embedded excerpts
-        # don't keep the purged text sitting on disk under a different name.
-        render_brief_html(
-            accepted, prep.context, prep.run_id, prep.data_version, generated_date,
-            prep.snapshot_date, prep.exceptions, gates.analyst_name, decision, {}, log.run_dir,
-        )
+    # brief.md/brief.html are the approved workshop output, excerpts and
+    # all — they are never touched by retention. Only the working file
+    # that held raw comment text is removed; a "return" closes this run
+    # exactly like an "approve" does (a revision means starting a new run).
+    retention.purge_comment_text(prep.run_id, runs_dir)
 
     print(f"Run {prep.run_id} complete. Outputs written to {log.run_dir}")
     print(f"Final decision: {decision}. The brief is not sent, emailed or published.")

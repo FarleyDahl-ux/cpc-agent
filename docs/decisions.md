@@ -805,48 +805,60 @@ chosen and recorded here.
 
 ## Comment-text retention
 
-- **`eligible_comments.json` is the only run-folder file that ever holds
-  raw comment text, so `retention.purge_comment_text` only needs to
-  delete one file.** `evidence_records.json`'s `aligned_ids`/
-  `countervailing_ids`/`ambiguous_links` are comment IDs and short notes,
-  never comment text; `exception_log.json` records quarantined comments by
-  ID and reason only; `audit_log.jsonl`'s tool-call results are already
-  sanitised to IDs/counts before being logged
-  (`investigate._sanitize_result_for_log`, an earlier round). Verified,
-  not assumed: `test_pipeline.py`/`test_webapp.py`'s retention tests grep
-  the actual output files for a real comment's text, not just for the
-  deleted filename.
-- **The one other place comment text can end up on disk is `brief.html`'s
-  embedded excerpt blockquotes (`brief._excerpt_blockquotes`) — never
-  `brief.md`, which only ever writes IDs/themes/limitations/notes
-  (`brief._feedback_block`).** So `purge_comment_text` itself only deletes
-  `eligible_comments.json` and logs that one event, but every caller
-  (`main.run_pipeline`, `dashboard_state.finalize_run`) re-renders
-  `brief.html` immediately afterwards, with an empty `comments_by_id` —
-  `_excerpt_blockquotes` already falls back to "(comment text
-  unavailable)" for any excerpt id it can't resolve (originally written
-  for a quarantined/unknown id), so this reuses an existing, tested code
-  path rather than adding a second way to blank out a quote. The
-  regenerated `brief.html` keeps every other guarantee the brief already
-  had — IDs, evidence status, gauge, exceptions, decision, DRAFT/approved
-  marker — since only `comments_by_id` changes between the two renders.
+- **`purge_comment_text` deletes only `eligible_comments.json` — the one
+  *working* file a run folder ever writes that holds raw comment text —
+  and never touches `brief.md`/`brief.html`, even though `brief.html`'s
+  excerpt blockquotes (`brief._excerpt_blockquotes`) also embed comment
+  text.** This is a deliberate correction from this feature's first
+  version, which also re-rendered `brief.html` with an empty
+  `comments_by_id` so its excerpts fell back to a placeholder — on
+  reflection, that treated the *approved workshop output* the analyst had
+  just signed off on as another piece of working data to be cleaned up,
+  when it's actually the deliverable the whole pipeline exists to produce.
+  `eligible_comments.json` is scratch material the dashboard/CLI use to
+  *build* that deliverable; once the deliverable is finalised, only the
+  scratch material is retention's concern. `evidence_records.json`'s
+  `aligned_ids`/`countervailing_ids`/`ambiguous_links` are comment IDs and
+  short notes, never comment text; `exception_log.json` records
+  quarantined comments by ID and reason only; `audit_log.jsonl`'s
+  tool-call results are already sanitised to IDs/counts before being
+  logged (`investigate._sanitize_result_for_log`, an earlier round) — so
+  `eligible_comments.json` really is the only file retention needs to act
+  on. Verified, not assumed: `test_pipeline.py`/`test_webapp.py`'s
+  retention tests grep the actual `brief.html` for a real comment's text
+  and assert it's *still there*, not just check the deleted filename.
+- **A "return" decision closes a run for retention purposes exactly like
+  an "approve" does — comment text is purged either way.** CLAUDE.md's
+  dashboard has no "reopen this run and revise the same review" flow: a
+  returned run's findings can't be re-submitted (`apply_finding_review`
+  rejects once the run has left `STATUS_REVIEW`), and the CLI has no
+  resume path either. Acting on a returned brief means starting a new run
+  from current data, not editing the old one — so a returned run's working
+  comment text has finished the job it existed for just as fully as an
+  approved run's has, and there is no "revision" state that would need it
+  kept around.
+- **The dashboard's `GET /runs/<id>/brief` route only calls
+  `generate_brief_preview` while the run is still pending its final
+  decision** (`webapp.brief()` checks `state["status"] not in
+  (STATUS_APPROVED, STATUS_RETURNED)`), even though `generate_brief_preview`
+  itself is otherwise happy to be called repeatedly. Before this fix, that
+  route regenerated the brief on every view regardless of status — harmless
+  before retention existed (nothing about the inputs changed after
+  finalisation), but actively wrong afterwards: revisiting the brief tab
+  after approval would silently re-render with an empty `comments_by_id`
+  (since `eligible_comments.json` was gone) and strip the very excerpts the
+  analyst had just approved. `finalize_run`'s own one-time call to
+  `generate_brief_preview` — made *before* status is used to pick the
+  rendered decision label, and *before* `purge_comment_text` runs — is
+  still what produces the final, excerpt-complete brief; nothing calls it
+  again after that for this run.
 - **Retention runs immediately after the final decision (`run_end`
   logged), not at some later scheduled point, and there is no
   configurable delay for it** — CLAUDE.md's own framing for this brief is
   "prepare and organise the evidence"; once the analyst has approved or
-  returned the brief, the investigation phase this run's comment text
-  existed to support is over. This does mean the brief.html an analyst
-  might reopen from the dashboard afterwards no longer shows the excerpts
-  it showed at the moment of decision — accepted deliberately: the file on
-  disk should reflect what's actually still being retained, not a memory
-  of what used to be there.
-- **The re-render happens unconditionally whenever the purge actually
-  deleted something** (`if purged: render_brief_html(...)` /
-  `if purged: generate_brief_preview(...)`), not only when the accepted
-  records actually had excerpts selected. A cheap, idempotent re-render
-  (same inputs otherwise, one dict swapped to empty) is simpler to reason
-  about than first checking whether any record's `*_excerpt_ids` is
-  non-empty, and it stays correct if that ever changes.
+  returned the brief, the working material that finding needed to reach a
+  decision has done its job. The brief itself is untouched, so this
+  doesn't cost the analyst anything they can still see in the workshop.
 - **`purge_old_runs` (the `--purge-older-than-days`/`--dry-run` CLI
   sweep) reads each run's age from the UTC timestamp embedded in its own
   `run_id`** (`audit.new_run_id`: `"<YYYYMMDDTHHMMSSZ>-<8 hex chars>"`),

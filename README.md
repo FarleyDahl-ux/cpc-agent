@@ -28,9 +28,9 @@ When the model links a comment to a signal but the reading is genuinely uncertai
 
 ## Retention
 
-Once a run reaches its final approval/return decision, `eligible_comments.json` — the one run-folder file that ever holds raw comment text — is deleted, and `brief.html` is re-rendered so its excerpt blockquotes fall back to "(comment text unavailable)" instead of keeping the quote on disk. IDs, counts, evidence records, reviewer decisions and the audit log are all untouched; the deletion itself is recorded in that run's `audit_log.jsonl` as a `retention_purge` event.
+Once a run reaches its final approval/return decision — a "return" closes the run just like an "approve" does; revising means starting a new run, not reopening this one — `eligible_comments.json` (the one *working* file a run folder holds that has raw comment text) is deleted. `brief.md` and `brief.html` are never touched: they are the approved workshop output, excerpts included, and stay exactly as generated. IDs, counts, evidence records, reviewer decisions and the audit log are all untouched too; the deletion itself is recorded in that run's `audit_log.jsonl` as a `retention_purge` event.
 
-Separately, `python -m cpc_agent.main --purge-older-than-days N` deletes whole run folders older than `N` days (by each run's own embedded timestamp, not filesystem mtime) — add `--dry-run` to see what would be deleted without deleting it. Since a deleted run folder takes its own audit log with it, these deletions are recorded in a central `runs/retention_log.jsonl` instead.
+Separately, `python -m cpc_agent.main --purge-older-than-days N` deletes whole run folders — briefs included — older than `N` days (by each run's own embedded timestamp, not filesystem mtime) — add `--dry-run` to see what would be deleted without deleting it. Since a deleted run folder takes its own audit log with it, these deletions are recorded in a central `runs/retention_log.jsonl` instead. This is the only mechanism that ever removes a brief.
 
 ## Review dashboard
 

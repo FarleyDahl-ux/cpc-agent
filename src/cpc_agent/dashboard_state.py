@@ -294,9 +294,14 @@ def apply_finding_review(
 
 def generate_brief_preview(run_id: str, runs_dir: Path = config.RUNS_DIR) -> tuple[bool, str]:
     """(Re)writes brief.md/brief.html from the current evidence records.
-    Safe to call repeatedly (e.g. on every GET of the brief tab) — always
-    reflects the latest accepted/edited findings. decision is "pending"
-    until finalize_run records the real one."""
+    Safe to call repeatedly while a run is still pending its final
+    decision (e.g. on every GET of the brief tab) — always reflects the
+    latest accepted/edited findings, and decision reads "pending" until
+    finalize_run records the real one. Callers must stop calling this once
+    a run is approved/returned — see webapp.brief()'s status guard — so
+    that the finalised brief (excerpts included) is never rewritten again,
+    in particular not after retention.purge_comment_text removes
+    eligible_comments.json."""
     state = load_state(run_id, runs_dir)
     if state is None:
         return False, "Run not found."
@@ -361,13 +366,12 @@ def finalize_run(run_id: str, decision: str, runs_dir: Path = config.RUNS_DIR) -
     log.log_event("run_end", status="completed", final_decision=decision)
     log.close()
 
-    purged, _ = retention.purge_comment_text(run_id, runs_dir)
-    if purged:
-        # eligible_comments.json is gone, so this re-render's comments_by_id
-        # is empty by construction — that's the point: it replaces the
-        # brief.html already written above (with real excerpts embedded)
-        # with one that doesn't retain that text on disk any longer.
-        generate_brief_preview(run_id, runs_dir)
+    # brief.md/brief.html (written above, excerpts included) are the
+    # approved workshop output and are never touched by retention — only
+    # the working file that held raw comment text is removed. A "return"
+    # closes this run exactly like an "approve" does; a revision means
+    # starting a new run, not reopening this one.
+    retention.purge_comment_text(run_id, runs_dir)
 
     return True, f"Run {decision}d."
 

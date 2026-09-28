@@ -227,11 +227,11 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     assert "Public Sans" not in html_text
     assert "Source Serif 4" not in html_text
 
-    # Retention: brief.html was re-rendered after eligible_comments.json was
-    # purged, so its excerpt blockquotes fall back to the placeholder —
-    # FB003's real text must not still be sitting in the persisted file.
-    assert "waited over a week for a reply" not in html_text  # FB003's actual text
-    assert "(comment text unavailable)" in html_text
+    # Retention: brief.html is the approved workshop output and is never
+    # rewritten by retention — its excerpts (FB003's real text among them)
+    # stay exactly as generated, even though eligible_comments.json (the
+    # working file, checked below) is gone.
+    assert "waited over a week for a reply" in html_text  # FB003's actual text
 
 
 def test_end_to_end_run_never_estimates_region_c_withdrawals(tmp_path):
