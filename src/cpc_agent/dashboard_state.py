@@ -22,7 +22,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config
+from . import config, retention
 from .audit import AuditLog
 from .brief import populate_cpc_template, render_brief_html, update_brief_status
 from .evidence import EvidenceRecord
@@ -360,6 +360,14 @@ def finalize_run(run_id: str, decision: str, runs_dir: Path = config.RUNS_DIR) -
     )
     log.log_event("run_end", status="completed", final_decision=decision)
     log.close()
+
+    purged, _ = retention.purge_comment_text(run_id, runs_dir)
+    if purged:
+        # eligible_comments.json is gone, so this re-render's comments_by_id
+        # is empty by construction — that's the point: it replaces the
+        # brief.html already written above (with real excerpts embedded)
+        # with one that doesn't retain that text on disk any longer.
+        generate_brief_preview(run_id, runs_dir)
 
     return True, f"Run {decision}d."
 

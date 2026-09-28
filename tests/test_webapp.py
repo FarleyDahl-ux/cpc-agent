@@ -243,6 +243,57 @@ def test_return_for_revision_marks_returned_not_approved(tmp_path):
     assert "Status: Returned" in brief_md
 
 
+# --- retention: comment text is purged after the final decision ------------
+
+
+@pytest.mark.parametrize("route,expected_status", [("approve", "approved"), ("return", "returned")])
+def test_comment_text_is_purged_after_final_decision(tmp_path, route, expected_status):
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    run_id = _start_run(client)
+
+    # An explicit excerpt selection on S1 so brief.html actually embeds a
+    # real comment excerpt before the purge — otherwise there'd be nothing
+    # in the brief to prove got removed.
+    resp = client.post(
+        f"/runs/{run_id}/review/S1",
+        data={"decision": "accept", "note": "", "aligned_excerpt": ["FB003"]},
+    )
+    assert resp.status_code == 302
+    _accept_all(client, run_id, finding_ids=("S2", "S3", "S4"))
+
+    assert (tmp_path / run_id / "eligible_comments.json").exists()
+    client.get(f"/runs/{run_id}/brief")  # triggers generate_brief_preview, writing brief.html
+    pre_purge_html = (tmp_path / run_id / "brief.html").read_text(encoding="utf-8")
+    assert "waited over a week for a reply" in pre_purge_html  # FB003's actual text
+
+    resp = client.post(f"/runs/{run_id}/{route}", follow_redirects=False)
+    assert resp.status_code == 302
+
+    state = json.loads((tmp_path / run_id / "state.json").read_text(encoding="utf-8"))
+    assert state["status"] == expected_status
+
+    assert not (tmp_path / run_id / "eligible_comments.json").exists()
+
+    audit_lines = (tmp_path / run_id / "audit_log.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    events = [json.loads(line) for line in audit_lines]
+    purge_events = [e for e in events if e["event"] == "retention_purge"]
+    assert len(purge_events) == 1
+    assert purge_events[0]["target"] == "eligible_comments.json"
+
+    # Evidence records (IDs, counts, decisions) are unaffected by the purge.
+    records = json.loads((tmp_path / run_id / "evidence_records.json").read_text(encoding="utf-8"))
+    s1 = next(r for r in records if r["finding_id"] == "S1")
+    assert s1["aligned_ids"] == ["FB003", "FB007", "FB011", "FB015"]
+    assert s1["reviewer_status"] == "accept"
+
+    # brief.html was re-rendered after the purge — no comment text remains
+    # in the run folder at all, on disk, once the final decision is made.
+    resp = client.get(f"/runs/{run_id}/brief.html")
+    assert b"waited over a week for a reply" not in resp.data  # FB003's actual text
+    assert b"(comment text unavailable)" in resp.data
+
+
 # --- quarantined content never reaches the browser --------------------------
 
 

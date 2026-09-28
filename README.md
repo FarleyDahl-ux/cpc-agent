@@ -18,13 +18,19 @@ pytest
 Unit tests are deterministic and never call the OpenAI API. Tests marked `@pytest.mark.integration` call the real API and are skipped by default; run them explicitly with `pytest -m integration` once `.env` is configured.
 
 ## Outputs
-Each run writes to `runs/<run_id>/`: `evidence_records.json`, `exception_log.json`, `audit_log.jsonl`, `brief.md`, `brief.html` (a one-A4-page design brief, styled by `src/cpc_agent/templates/brief.css` — design source `docs/brief_mockup.html`, kept there only as a human-readable preview — filled entirely from that run's data, with system fonts only so it opens correctly offline), `state.json` and `eligible_comments.json` (dashboard-only — see below). Everything in `runs/` is git-ignored — it is generated output, not source.
+Each run writes to `runs/<run_id>/`: `evidence_records.json`, `exception_log.json`, `audit_log.jsonl`, `brief.md`, `brief.html` (a one-A4-page design brief, styled by `src/cpc_agent/templates/brief.css` — design source `docs/brief_mockup.html`, kept there only as a human-readable preview — filled entirely from that run's data, with system fonts only so it opens correctly offline), `state.json` and `eligible_comments.json`. The last of these is deleted once the run reaches its final decision (see Retention, below); `runs/retention_log.jsonl` (top-level, not per-run) records any whole run folders later purged for being too old. Everything in `runs/` is git-ignored — it is generated output, not source.
 
 ## Investigation loop
 
 Before the model can search any feedback, it must call `submit_plan`: a one/two-sentence goal plus, for every flagged signal, its intended search approach in both directions (aligned and countervailing). `search_comments` is rejected until a plan exists, and the plan (and any later `revise_plan` call, which requires a short reason) is written to `audit_log.jsonl` — as its own `investigation_plan`/`investigation_plan_revision` event — the moment it's submitted, not reconstructed afterwards.
 
 When the model links a comment to a signal but the reading is genuinely uncertain, it can set `record_link`'s `ambiguous` flag with a short `ambiguous_note` explaining why, instead of silently dropping the link or forcing a confident classification. The link still counts normally for evidence status; the flag and note are carried into `evidence_records.json` (`ambiguous_links`) and shown as an "Ambiguous" badge on the dashboard's review page, for a reviewer to look at more closely.
+
+## Retention
+
+Once a run reaches its final approval/return decision, `eligible_comments.json` — the one run-folder file that ever holds raw comment text — is deleted, and `brief.html` is re-rendered so its excerpt blockquotes fall back to "(comment text unavailable)" instead of keeping the quote on disk. IDs, counts, evidence records, reviewer decisions and the audit log are all untouched; the deletion itself is recorded in that run's `audit_log.jsonl` as a `retention_purge` event.
+
+Separately, `python -m cpc_agent.main --purge-older-than-days N` deletes whole run folders older than `N` days (by each run's own embedded timestamp, not filesystem mtime) — add `--dry-run` to see what would be deleted without deleting it. Since a deleted run folder takes its own audit log with it, these deletions are recorded in a central `runs/retention_log.jsonl` instead.
 
 ## Review dashboard
 

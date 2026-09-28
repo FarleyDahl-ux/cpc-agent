@@ -802,3 +802,83 @@ chosen and recorded here.
   of unresolved-ness). The reviewer decides what to do with the flag the
   same way they decide everything else at the findings review gate —
   accept, edit a note, or reject.
+
+## Comment-text retention
+
+- **`eligible_comments.json` is the only run-folder file that ever holds
+  raw comment text, so `retention.purge_comment_text` only needs to
+  delete one file.** `evidence_records.json`'s `aligned_ids`/
+  `countervailing_ids`/`ambiguous_links` are comment IDs and short notes,
+  never comment text; `exception_log.json` records quarantined comments by
+  ID and reason only; `audit_log.jsonl`'s tool-call results are already
+  sanitised to IDs/counts before being logged
+  (`investigate._sanitize_result_for_log`, an earlier round). Verified,
+  not assumed: `test_pipeline.py`/`test_webapp.py`'s retention tests grep
+  the actual output files for a real comment's text, not just for the
+  deleted filename.
+- **The one other place comment text can end up on disk is `brief.html`'s
+  embedded excerpt blockquotes (`brief._excerpt_blockquotes`) — never
+  `brief.md`, which only ever writes IDs/themes/limitations/notes
+  (`brief._feedback_block`).** So `purge_comment_text` itself only deletes
+  `eligible_comments.json` and logs that one event, but every caller
+  (`main.run_pipeline`, `dashboard_state.finalize_run`) re-renders
+  `brief.html` immediately afterwards, with an empty `comments_by_id` —
+  `_excerpt_blockquotes` already falls back to "(comment text
+  unavailable)" for any excerpt id it can't resolve (originally written
+  for a quarantined/unknown id), so this reuses an existing, tested code
+  path rather than adding a second way to blank out a quote. The
+  regenerated `brief.html` keeps every other guarantee the brief already
+  had — IDs, evidence status, gauge, exceptions, decision, DRAFT/approved
+  marker — since only `comments_by_id` changes between the two renders.
+- **Retention runs immediately after the final decision (`run_end`
+  logged), not at some later scheduled point, and there is no
+  configurable delay for it** — CLAUDE.md's own framing for this brief is
+  "prepare and organise the evidence"; once the analyst has approved or
+  returned the brief, the investigation phase this run's comment text
+  existed to support is over. This does mean the brief.html an analyst
+  might reopen from the dashboard afterwards no longer shows the excerpts
+  it showed at the moment of decision — accepted deliberately: the file on
+  disk should reflect what's actually still being retained, not a memory
+  of what used to be there.
+- **The re-render happens unconditionally whenever the purge actually
+  deleted something** (`if purged: render_brief_html(...)` /
+  `if purged: generate_brief_preview(...)`), not only when the accepted
+  records actually had excerpts selected. A cheap, idempotent re-render
+  (same inputs otherwise, one dict swapped to empty) is simpler to reason
+  about than first checking whether any record's `*_excerpt_ids` is
+  non-empty, and it stays correct if that ever changes.
+- **`purge_old_runs` (the `--purge-older-than-days`/`--dry-run` CLI
+  sweep) reads each run's age from the UTC timestamp embedded in its own
+  `run_id`** (`audit.new_run_id`: `"<YYYYMMDDTHHMMSSZ>-<8 hex chars>"`),
+  **not from filesystem mtime.** A folder's mtime changes on copy, backup
+  or `git` checkout in ways that have nothing to do with when the run
+  actually happened, and a CLI-only run has no `state.json` with a
+  `created_at` field to fall back on (only the dashboard writes one) — the
+  run_id is the one thing both code paths always have, since both share
+  `audit.new_run_id()` via `prepare_run_for_review`.
+- **A folder under `runs/` whose name doesn't parse as
+  `<run_id timestamp>-<hex>` is never touched by `purge_old_runs`** — it's
+  skipped outright, not treated as infinitely old or infinitely new. This
+  guards against ever deleting something that ended up in `runs/` by
+  accident (a manual copy, a stray directory) purely because its name
+  didn't match the one shape the sweep understands; conservative by
+  construction rather than by an extra explicit check.
+- **`purge_old_runs` deletes the *whole* run folder — including that
+  run's own `audit_log.jsonl` — unlike `purge_comment_text`, which only
+  ever removes one file and leaves everything else (including that run's
+  audit log) in place.** These are deliberately two different retention
+  policies at two different strengths: the post-decision purge keeps a
+  run fully traceable (IDs, decisions, audit trail) while removing only
+  the sensitive text; the age-based sweep is a wholesale "this run is old
+  enough to not be worth keeping at all" cleanup, matching "purge run
+  folders" (not "purge comment text from old run folders") in the
+  request. Because the run folder is gone afterwards, its own audit log
+  can't record the deletion — so this event goes to a separate, central
+  `runs/retention_log.jsonl` instead, appended to (never overwritten),
+  which is also why "record deletions in the audit log" has two different
+  concrete answers here rather than one.
+- **`purge_old_runs` returns one entry per folder considered old enough
+  regardless of `dry_run`, with a `"deleted"` boolean**, rather than
+  returning nothing in dry-run mode. `--dry-run`'s whole purpose is to let
+  an analyst see what *would* be deleted before committing to it, so the
+  reporting path has to run whether or not the deletion does.

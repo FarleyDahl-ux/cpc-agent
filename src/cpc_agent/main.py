@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import audit, config
+from . import audit, config, retention
 from .brief import populate_cpc_template, render_brief_html, update_brief_status
 from .evidence import EvidenceRecord, build_evidence_record
 from .gates import Gates
@@ -61,6 +61,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default=None,
         help="Path to a scripted-mode answers JSON file (see examples/demo_answers.json).",
+    )
+    parser.add_argument(
+        "--purge-older-than-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Delete whole run folders older than N days (by each run's own timestamp), instead "
+            "of running the pipeline. Deletions are recorded in runs/retention_log.jsonl."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --purge-older-than-days, list run folders that would be deleted without deleting them.",
     )
     return parser.parse_args(argv)
 
@@ -353,13 +368,37 @@ def run_pipeline(
     log.log_event("run_end", status="completed", final_decision=decision)
     log.close()
 
+    purged, _ = retention.purge_comment_text(prep.run_id, runs_dir)
+    if purged:
+        # comments_by_id is now stale by design (the file it was read from
+        # is gone) — re-render so brief.html's already-embedded excerpts
+        # don't keep the purged text sitting on disk under a different name.
+        render_brief_html(
+            accepted, prep.context, prep.run_id, prep.data_version, generated_date,
+            prep.snapshot_date, prep.exceptions, gates.analyst_name, decision, {}, log.run_dir,
+        )
+
     print(f"Run {prep.run_id} complete. Outputs written to {log.run_dir}")
     print(f"Final decision: {decision}. The brief is not sent, emailed or published.")
     return 0
 
 
+def _run_purge_old_runs(older_than_days: int, dry_run: bool, runs_dir: Path = config.RUNS_DIR) -> int:
+    results = retention.purge_old_runs(runs_dir, older_than_days, dry_run=dry_run)
+    if not results:
+        print(f"No run folders older than {older_than_days} day(s) found.")
+        return 0
+    verb = "Would delete" if dry_run else "Deleted"
+    for entry in results:
+        print(f"{verb}: {entry['run_id']} (created {entry['created_at']})")
+    print(f"{verb} {len(results)} run folder(s).")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.purge_older_than_days is not None:
+        return _run_purge_old_runs(args.purge_older_than_days, args.dry_run)
     return run_pipeline(answers_path=args.answers)
 
 

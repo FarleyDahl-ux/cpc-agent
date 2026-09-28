@@ -158,9 +158,17 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     audit_lines = (run_dir / "audit_log.jsonl").read_text(encoding="utf-8").strip().splitlines()
     events = [json.loads(line) for line in audit_lines]
     assert events[0]["event"] == "run_start"
-    assert events[-1]["event"] == "run_end"
-    assert events[-1]["status"] == "completed"
-    assert events[-1]["final_decision"] == "approve"
+    # retention_purge (comment text deleted after the final decision) is
+    # logged after run_end, so it's the very last event, not run_end itself.
+    assert events[-1]["event"] == "retention_purge"
+    assert events[-1]["target"] == "eligible_comments.json"
+    run_end = next(e for e in events if e["event"] == "run_end")
+    assert run_end["status"] == "completed"
+    assert run_end["final_decision"] == "approve"
+
+    # Retention: comment text is gone from the run folder after the final
+    # decision, but IDs/counts/decisions survive untouched.
+    assert not (run_dir / "eligible_comments.json").exists()
 
     brief_text = (run_dir / "brief.md").read_text(encoding="utf-8")
     for term in FORBIDDEN_STRINGS:
@@ -218,6 +226,12 @@ def test_end_to_end_run_produces_all_four_outputs(tmp_path):
     assert "https://" not in html_text
     assert "Public Sans" not in html_text
     assert "Source Serif 4" not in html_text
+
+    # Retention: brief.html was re-rendered after eligible_comments.json was
+    # purged, so its excerpt blockquotes fall back to the placeholder —
+    # FB003's real text must not still be sitting in the persisted file.
+    assert "waited over a week for a reply" not in html_text  # FB003's actual text
+    assert "(comment text unavailable)" in html_text
 
 
 def test_end_to_end_run_never_estimates_region_c_withdrawals(tmp_path):
