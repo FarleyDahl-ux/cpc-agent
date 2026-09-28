@@ -20,6 +20,10 @@ Unit tests are deterministic and never call the OpenAI API. Tests marked `@pytes
 ## Outputs
 Each run writes to `runs/<run_id>/`: `evidence_records.json`, `exception_log.json`, `audit_log.jsonl`, `brief.md`, `brief.html` (a one-A4-page design brief, styled by `src/cpc_agent/templates/brief.css` — design source `docs/brief_mockup.html`, kept there only as a human-readable preview — filled entirely from that run's data, with system fonts only so it opens correctly offline), `state.json` and `eligible_comments.json` (dashboard-only — see below). Everything in `runs/` is git-ignored — it is generated output, not source.
 
+## Investigation loop
+
+Before the model can search any feedback, it must call `submit_plan`: a one/two-sentence goal plus, for every flagged signal, its intended search approach in both directions (aligned and countervailing). `search_comments` is rejected until a plan exists, and the plan (and any later `revise_plan` call, which requires a short reason) is written to `audit_log.jsonl` — as its own `investigation_plan`/`investigation_plan_revision` event — the moment it's submitted, not reconstructed afterwards.
+
 ## Review dashboard
 
 A local, single-user web dashboard for the human gates, built on `docs/dashboard_mockup.html`'s design:

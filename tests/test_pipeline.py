@@ -54,9 +54,18 @@ class _FakeResponse:
         self.choices = [_FakeChoice(message)]
 
 
+_PLAN_ARGS = {
+    "goal": "Investigate each flagged signal for aligned and countervailing learner feedback.",
+    "signals": [
+        {"signal_id": sid, "aligned_plan": "search for related complaints", "countervailing_plan": "search for related praise"}
+        for sid in ("S1", "S2", "S3", "S4")
+    ],
+}
+
 _DEFAULT_SCRIPT = [
     ("get_comment_corpus_profile", {}),
     ("list_signals", {}),
+    ("submit_plan", _PLAN_ARGS),
     ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "looking for support complaints", "keywords": ["reply"]}),
     ("search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "looking for support praise", "keywords": ["detailed"]}),
     *[
@@ -237,6 +246,7 @@ def test_end_to_end_run_records_search_budget_exhaustion_as_a_limitation(tmp_pat
     script = [
         ("get_comment_corpus_profile", {}),
         ("list_signals", {}),
+        ("submit_plan", _PLAN_ARGS),
         ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r1", "keywords": ["reply"]}),
         ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r2", "keywords": ["help"]}),
         ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r3", "keywords": ["wait"]}),
@@ -280,9 +290,20 @@ def test_end_to_end_run_records_search_budget_exhaustion_as_a_limitation(tmp_pat
     limitation_events = [e for e in events if e.get("event") == "investigation_limitation"]
     assert any(e["signal_id"] == "S1" and "budget" in e["summary"].lower() for e in limitation_events)
 
+    # The plan itself was logged once, at submission time (not a
+    # reconstructed end-of-run summary), and no revision was made.
     plan_events = [e for e in events if e.get("event") == "investigation_plan"]
     assert len(plan_events) == 1
-    plan = plan_events[0]
-    assert plan["total_searches"] >= 3  # the rejected 4th attempt is not counted as a successful search
-    s1_plan = next(s for s in plan["signals"] if s["signal_id"] == "S1")
-    assert s1_plan["searches"]["aligned"] == 3  # capped at the budget, not 4
+    assert plan_events[0]["goal"] == _PLAN_ARGS["goal"]
+    assert [s["signal_id"] for s in plan_events[0]["signals"]] == ["S1", "S2", "S3", "S4"]
+    assert [e for e in events if e.get("event") == "investigation_plan_revision"] == []
+
+    # The rejected 4th search_comments call for S1/aligned is a logged tool
+    # call with an error, distinct from the 3 that actually succeeded.
+    s1_aligned_search_calls = [
+        e for e in events
+        if e.get("event") == "tool_call" and e.get("tool") == "search_comments" and e.get("args", {}).get("signal_id") == "S1"
+        and e.get("args", {}).get("direction") == "aligned"
+    ]
+    assert len(s1_aligned_search_calls) == 4  # 3 successful + 1 rejected
+    assert sum(1 for e in s1_aligned_search_calls if "error" in (e.get("result") or {})) == 1

@@ -392,6 +392,12 @@ def _trace_entry_for_tool_call(time: str, event: dict) -> dict | None:
     result = event.get("result")
     result = result if isinstance(result, dict) else {}
 
+    if tool in ("submit_plan", "revise_plan"):
+        # Already shown as a dedicated "investigation_plan"/
+        # "investigation_plan_revision" event (logged the moment the plan
+        # is submitted/revised, see investigate.run_investigation) — skip
+        # the generic tool_call entry so the plan doesn't appear twice.
+        return None
     if tool == "search_comments":
         if "error" in result:
             return {"time": time, "kind": "agent", "what": "Search rejected", "why": result.get("error", "")}
@@ -486,8 +492,18 @@ def _trace_entry(event: dict) -> dict | None:
         return {
             "time": time,
             "kind": "sys",
-            "what": "Investigation plan complete",
-            "res": f"{event.get('total_searches', 0)} searches across {signal_count} signal{'s' if signal_count != 1 else ''}",
+            "what": "Submitted an investigation plan",
+            "why": event.get("goal", ""),
+            "res": f"Covers {signal_count} signal{'s' if signal_count != 1 else ''}",
+        }
+    if kind == "investigation_plan_revision":
+        signal_count = len(event.get("signals", []))
+        return {
+            "time": time,
+            "kind": "sys",
+            "what": "Revised the investigation plan",
+            "why": event.get("reason", ""),
+            "res": f"Covers {signal_count} signal{'s' if signal_count != 1 else ''}",
         }
     if kind == "tool_call":
         return _trace_entry_for_tool_call(time, event)

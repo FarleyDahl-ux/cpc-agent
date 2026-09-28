@@ -63,9 +63,21 @@ def test_real_investigation_loop_completes_and_stays_within_bounds():
             assert tools.search_count(signal.id, "aligned") >= 1, signal.id
             assert tools.search_count(signal.id, "countervailing") >= 1, signal.id
 
-    assert plan_events and plan_events[0][0] == "investigation_plan"
-    plan = plan_events[0][1]
-    assert plan["finished"] is True
+    # A plan was submitted (and logged at submission time) covering every signal.
+    submit_events = [payload for event, payload in plan_events if event == "investigation_plan"]
+    assert submit_events, "submit_plan was never called"
+    assert submit_events[0]["goal"].strip()
+    assert {s["signal_id"] for s in submit_events[0]["signals"]} == {s.id for s in signals}
+    for entry in submit_events[0]["signals"]:
+        assert entry["aligned_plan"].strip()
+        assert entry["countervailing_plan"].strip()
+
+    # No search happened before the plan: the first tool call after any
+    # list_signals/get_comment_corpus_profile calls that isn't itself a plan
+    # call must not be a rejected-for-no-plan search_comments error.
+    for name, _, result in tool_calls:
+        if name == "search_comments" and isinstance(result, dict) and "error" in result:
+            assert "plan" not in result["error"].lower() or "budget" in result["error"].lower()
 
     for signal_id in list(tools.aligned) + list(tools.countervailing):
         for link in {**tools.aligned[signal_id], **tools.countervailing[signal_id]}.values():

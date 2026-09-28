@@ -68,9 +68,18 @@ class _FakeClient:
         return _FakeResponse(self._messages.pop(0))
 
 
+PLAN_ARGS = {
+    "goal": "Investigate each flagged signal for aligned and countervailing learner feedback.",
+    "signals": [
+        {"signal_id": sid, "aligned_plan": "search for related complaints", "countervailing_plan": "search for related praise"}
+        for sid in ("S1", "S2", "S3", "S4")
+    ],
+}
+
 COMPLETE_SCRIPT = [
     ("get_comment_corpus_profile", {}),
     ("list_signals", {}),
+    ("submit_plan", PLAN_ARGS),
     ("search_comments", {"signal_id": "S1", "direction": "aligned", "reason": "r", "keywords": ["reply", "help"]}),
     ("search_comments", {"signal_id": "S1", "direction": "countervailing", "reason": "r", "keywords": ["detailed"]}),
     *[
@@ -429,3 +438,19 @@ def test_activity_trace_has_no_comment_text_and_no_illustrative_data(tmp_path):
     assert "waited over a week for a reply" not in body  # FB003's actual text
     assert "Tuesday night drop-in" not in body  # FB019's actual text
     assert "Planned the investigation" not in body  # mockup-only illustrative line
+
+
+def test_activity_trace_shows_investigation_plan_exactly_once(tmp_path):
+    # submit_plan produces both a "tool_call" audit event and a dedicated
+    # "investigation_plan" event; the trace must render the plan from the
+    # dedicated event only, not also as a generic "Called submit_plan" line.
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    run_id = _start_run(client)
+
+    resp = client.get(f"/runs/{run_id}/activity")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+
+    assert body.count(PLAN_ARGS["goal"]) == 1
+    assert "Called submit_plan" not in body

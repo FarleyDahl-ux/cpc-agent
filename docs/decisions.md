@@ -700,3 +700,61 @@ chosen and recorded here.
   dashboard trusts whatever name is typed into "Your name" — fine for a
   localhost-only single-user tool, not otherwise); and UI for the
   pre-review gates it currently auto-resolves.
+
+## Plan-first investigation gating
+
+- **`search_comments` is rejected outright until `submit_plan` has
+  succeeded once**, checked at the very top of
+  `InvestigationTools.search_comments` before any other validation. This
+  supersedes the "Genuinely iterative investigation" round's
+  `build_plan()` design (an end-of-run summary reconstructed from search
+  logs/links after the fact) — that plan was descriptive, not a gate; this
+  one is enforced before the first search can happen at all, which is
+  what "plan before acting" actually requires. `build_plan()` and the
+  end-of-run `investigation_plan` audit call it fed were both removed
+  rather than kept alongside the new mechanism, since a plan reconstructed
+  from what the model already did and a plan the model commits to in
+  advance would otherwise coexist under the same event name with two
+  different meanings.
+- **The plan must name every flagged signal, with a non-empty aligned-
+  and countervailing-direction statement each** (`_validate_plan_signals`)
+  — a plan that only covers some signals, or covers a signal with an
+  empty string for one direction, is rejected with a specific error
+  naming what's missing/unknown/duplicated. A plan that silently omits a
+  signal would let the model search that signal's evidence without ever
+  having stated an approach for it, which defeats the point of gating on
+  a plan in the first place; requiring both directions up front mirrors
+  the same aligned/countervailing symmetry the search budget and
+  `finish_investigation` gate already enforce elsewhere.
+- **`revise_plan` requires a `reason` and can only be called after
+  `submit_plan` has already succeeded once** — revising nothing isn't
+  meaningful, and a reason (however short) is the mechanism for "doing
+  this openly rather than quietly searching differently than stated"
+  (system prompt). Each revision fully replaces the stored plan (not a
+  diff/patch) and increments `plan_revision_count`, which keeps
+  `InvestigationTools.plan` a single source of truth for "what is the
+  model's current stated approach" rather than a plan plus a change log
+  that a reader would have to reconcile by hand.
+- **The plan (and every revision) is logged to the audit trail the
+  moment `submit_plan`/`revise_plan` succeeds, as its own event
+  (`investigation_plan` / `investigation_plan_revision`), routed through
+  the existing `audit_log_event_fn` callback** — not read back out of
+  `InvestigationTools` at the end of the run. This is the direct fix for
+  the previous round's design: a plan logged only when the loop ends
+  can't show a human watching the dashboard mid-run that a plan exists at
+  all, and can't distinguish an original plan from a revision (both would
+  collapse into whatever the final state happened to be). Logging at the
+  moment of success also means a revision that the model then abandons
+  (e.g. the run ends before `finish_investigation`) is still on the
+  record — the audit trail reflects what was actually declared, not just
+  what survived to the end.
+- **The dashboard's generic `tool_call` trace entry is suppressed for
+  `submit_plan`/`revise_plan`** (`_trace_entry_for_tool_call` returns
+  `None` for these two tool names) **so the Agent Activity tab shows the
+  plan once, via its dedicated `investigation_plan`/
+  `investigation_plan_revision` trace entry, not twice.** Every other
+  tool still gets its generic per-call entry; these two are the only
+  tools whose call is *also* independently logged as its own named audit
+  event, so without this exclusion the same action would appear as both
+  "Called submit_plan" and "Submitted an investigation plan" back to
+  back.

@@ -9,13 +9,16 @@ needs to call the API) and kept behind this module so the provider could be
 swapped without touching the rest of the pipeline.
 
 Every hard boundary here is enforced in code, not requested of the model:
+submit_plan must be called before any search_comments call is accepted;
 search_comments requires a real filter and is capped at 5 results; a search
 budget (3 per signal per direction, 24 per run, no identical repeats) is
 tracked and enforced regardless of what the model asks for; a budget
 running out always produces a recorded limitation, never a quietly weaker
 evidence link; and finish_investigation is rejected — with the specific
 unmet requirements handed back to the model — until every signal has been
-searched in both directions or already carries a recorded limitation.
+searched in both directions or already carries a recorded limitation. The
+plan (and every revision) is logged to the audit trail at the moment it is
+submitted, not reconstructed after the fact.
 """
 from __future__ import annotations
 
@@ -59,14 +62,23 @@ anything, or write files; you only use the tools provided.
 Use only tool results. Do not use outside knowledge, assumptions, or
 anything not returned by a tool call.
 
-Work signal by signal. For each signal from list_signals, first call
-get_comment_corpus_profile (once is enough for the whole run) to see what
-delivery modes, regions and periods actually have eligible comments, so you
-don't waste searches on values that don't exist. Then investigate each
-signal in both directions separately: search for comments consistent with
-it (aligned) and, separately, comments that directly contradict it
-(countervailing) — treat these as two distinct lines of inquiry with their
-own filters and keywords, not one generic search you sort afterwards.
+Before you search anything, call list_signals, then get_comment_corpus_profile
+(once is enough for the whole run) to see what delivery modes, regions and
+periods actually have eligible comments, then call submit_plan: restate the
+goal of this investigation in one or two sentences, and for every signal
+from list_signals, state your intended search approach in both directions
+(aligned and countervailing) — what you expect to look for and why.
+search_comments is rejected until a plan exists. If you need to change
+approach partway through (a search revealed the plan won't work, or a
+signal needs a different angle), call revise_plan with the full updated
+plan and a short reason for the change — do this openly rather than just
+quietly searching differently than you said you would.
+
+Work signal by signal. Investigate each signal in both directions
+separately: search for comments consistent with it (aligned) and,
+separately, comments that directly contradict it (countervailing) — treat
+these as two distinct lines of inquiry with their own filters and
+keywords, not one generic search you sort afterwards.
 
 search_comments always needs a signal_id, a direction ("aligned" or
 "countervailing"), a short reason for that specific search, and at least
@@ -166,6 +178,71 @@ TOOL_SPECS = [
                 "Call this before search_comments to see what values are actually worth searching for."
             ),
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "submit_plan",
+            "description": (
+                "Records the investigation plan: the goal, and for every signal, the intended "
+                "search approach in both directions. Must be called before any search_comments "
+                "call is accepted — search_comments is rejected until a plan exists."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string", "description": "One or two sentences restating what this investigation is trying to establish."},
+                    "signals": {
+                        "type": "array",
+                        "description": "One entry per signal from list_signals — every signal must be covered.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "signal_id": {"type": "string"},
+                                "aligned_plan": {"type": "string", "description": "Intended search approach for aligned evidence."},
+                                "countervailing_plan": {"type": "string", "description": "Intended search approach for countervailing evidence."},
+                            },
+                            "required": ["signal_id", "aligned_plan", "countervailing_plan"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["goal", "signals"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "revise_plan",
+            "description": (
+                "Replaces the current investigation plan with an updated one. Requires a reason. "
+                "Can only be called after submit_plan."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string"},
+                    "signals": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "signal_id": {"type": "string"},
+                                "aligned_plan": {"type": "string"},
+                                "countervailing_plan": {"type": "string"},
+                            },
+                            "required": ["signal_id", "aligned_plan", "countervailing_plan"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "reason": {"type": "string", "description": "Why the plan is being revised."},
+                },
+                "required": ["goal", "signals", "reason"],
+                "additionalProperties": False,
+            },
         },
     },
     {
@@ -298,6 +375,8 @@ class InvestigationTools:
     total_searches: int = 0
     limitations: dict[str, list[str]] = field(default_factory=dict)
     search_log: list[dict] = field(default_factory=list)
+    plan: dict | None = None
+    plan_revision_count: int = 0
 
     def __post_init__(self) -> None:
         self.signals_by_id = {s.id: s for s in self.signals}
@@ -337,6 +416,47 @@ class InvestigationTools:
         if text not in bucket:
             bucket.append(text)
 
+    def _validate_plan_signals(self, signals: object) -> list[dict]:
+        if not isinstance(signals, list) or not signals:
+            raise ToolError("signals must be a non-empty list covering every signal.")
+        seen: set[str] = set()
+        for item in signals:
+            if not isinstance(item, dict):
+                raise ToolError("each item in signals must be an object.")
+            sid = item.get("signal_id")
+            if sid not in self.signals_by_id:
+                raise ToolError(f"Unknown signal_id in plan: {sid!r}")
+            if sid in seen:
+                raise ToolError(f"Duplicate signal_id in plan: {sid!r}")
+            seen.add(sid)
+            if not str(item.get("aligned_plan") or "").strip():
+                raise ToolError(f"aligned_plan is required for signal {sid!r}")
+            if not str(item.get("countervailing_plan") or "").strip():
+                raise ToolError(f"countervailing_plan is required for signal {sid!r}")
+        missing = set(self.signals_by_id) - seen
+        if missing:
+            raise ToolError(f"Plan must cover every signal; missing: {sorted(missing)}")
+        return signals
+
+    def submit_plan(self, goal: str, signals: list[dict]) -> dict:
+        if not goal or not str(goal).strip():
+            raise ToolError("goal is required")
+        self._validate_plan_signals(signals)
+        self.plan = {"goal": goal, "signals": signals}
+        return {"status": "recorded", "signal_count": len(signals)}
+
+    def revise_plan(self, goal: str, signals: list[dict], reason: str) -> dict:
+        if self.plan is None:
+            raise ToolError("Cannot revise a plan before submit_plan has been called.")
+        if not reason or not str(reason).strip():
+            raise ToolError("reason is required")
+        if not goal or not str(goal).strip():
+            raise ToolError("goal is required")
+        self._validate_plan_signals(signals)
+        self.plan = {"goal": goal, "signals": signals}
+        self.plan_revision_count += 1
+        return {"status": "recorded", "signal_count": len(signals), "revision": self.plan_revision_count}
+
     def search_comments(
         self,
         signal_id: str,
@@ -346,6 +466,8 @@ class InvestigationTools:
         delivery_region: str | None = None,
         keywords: list[str] | str | None = None,
     ) -> list[dict]:
+        if self.plan is None:
+            raise ToolError("No investigation plan has been submitted yet — call submit_plan before searching.")
         if signal_id not in self.signals_by_id:
             raise ToolError(f"Unknown signal_id: {signal_id!r}")
         if direction not in DIRECTIONS:
@@ -492,29 +614,6 @@ class InvestigationTools:
                         "investigation ended.",
                     )
 
-    def build_plan(self) -> dict:
-        """A structured, machine-readable summary of the whole
-        investigation: what was searched, in which direction, why, and
-        what was found or left unresolved — logged once as the
-        'investigation_plan' audit event."""
-        return {
-            "total_searches": self.total_searches,
-            "run_wide_budget_exhausted": self.total_searches >= MAX_SEARCHES_PER_RUN,
-            "finished": self.finished,
-            "signals": [
-                {
-                    "signal_id": s.id,
-                    "searches": {direction: self.search_count(s.id, direction) for direction in DIRECTIONS},
-                    "aligned_ids": self.aligned_ids(s.id),
-                    "countervailing_ids": self.countervailing_ids(s.id),
-                    "no_evidence_reason": self.no_evidence.get(s.id),
-                    "limitations": list(self.limitations.get(s.id, [])),
-                }
-                for s in self.signals
-            ],
-            "search_log": list(self.search_log),
-        }
-
     def aligned_ids(self, signal_id: str) -> list[str]:
         return list(self.aligned.get(signal_id, {}))
 
@@ -537,6 +636,24 @@ def _execute_tool(tools: InvestigationTools, name: str, args: dict) -> object:
         if args:
             raise ToolError("get_comment_corpus_profile takes no arguments")
         return tools.get_comment_corpus_profile()
+    if name == "submit_plan":
+        required = {"goal", "signals"}
+        missing = required - set(args)
+        if missing:
+            raise ToolError(f"submit_plan missing arguments: {sorted(missing)}")
+        extra = set(args) - required
+        if extra:
+            raise ToolError(f"submit_plan got unexpected arguments: {sorted(extra)}")
+        return tools.submit_plan(**{k: args[k] for k in required})
+    if name == "revise_plan":
+        required = {"goal", "signals", "reason"}
+        missing = required - set(args)
+        if missing:
+            raise ToolError(f"revise_plan missing arguments: {sorted(missing)}")
+        extra = set(args) - required
+        if extra:
+            raise ToolError(f"revise_plan got unexpected arguments: {sorted(extra)}")
+        return tools.revise_plan(**{k: args[k] for k in required})
     if name == "search_comments":
         allowed = {"signal_id", "direction", "reason", "delivery_mode", "delivery_region", "keywords"}
         required = {"signal_id", "direction", "reason"}
@@ -641,8 +758,9 @@ def run_investigation(
     audit_log_tool_call_fn(name, args, result) is called for every tool
     call, successful or not — `result` is always sanitised to IDs/counts
     only (_sanitize_result_for_log), never comment text.
-    audit_log_event_fn("investigation_plan", plan) is called once, at the
-    end, with a structured summary of the whole investigation.
+    audit_log_event_fn(event, payload) is called the moment a plan is
+    submitted ("investigation_plan") or revised ("investigation_plan_revision")
+    — the plan is logged when it happens, not reconstructed at the end.
     """
     tools = InvestigationTools(signals=signals, eligible_comments=eligible_comments, ask_analyst_fn=ask_analyst_fn)
     if not signals:
@@ -651,8 +769,6 @@ def run_investigation(
         for signal in signals:
             tools.note_no_evidence(signal.id, "No eligible learner feedback comments were available.")
         tools.finalize_limitations()
-        if audit_log_event_fn is not None:
-            audit_log_event_fn("investigation_plan", tools.build_plan())
         return tools
 
     client = client or _get_client()
@@ -708,6 +824,12 @@ def run_investigation(
             if audit_log_tool_call_fn is not None:
                 audit_log_tool_call_fn(name, args, log_result)
 
+            if error is None and audit_log_event_fn is not None:
+                if name == "submit_plan":
+                    audit_log_event_fn("investigation_plan", dict(args))
+                elif name == "revise_plan":
+                    audit_log_event_fn("investigation_plan_revision", dict(args))
+
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": content})
 
             if tools.finished:
@@ -719,8 +841,6 @@ def run_investigation(
             break
 
     tools.finalize_limitations()
-    if audit_log_event_fn is not None:
-        audit_log_event_fn("investigation_plan", tools.build_plan())
 
     return tools
 
