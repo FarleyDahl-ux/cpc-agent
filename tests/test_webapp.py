@@ -520,6 +520,39 @@ def test_activity_trace_has_no_comment_text_and_no_illustrative_data(tmp_path):
     assert "Planned the investigation" not in body  # mockup-only illustrative line
 
 
+def test_workflow_summary_panel_reflects_the_run_record(tmp_path):
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    run_id = _start_run(client)
+
+    resp = client.get(f"/runs/{run_id}/activity")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+
+    # Goal, from the submitted plan.
+    assert PLAN_ARGS["goal"] in body
+    # Sources used, from the files the scope gate found.
+    assert "student_feedback.csv" in body
+    # Confirmed facts: flagged results with figures, not just IDs.
+    assert "S1" in body and "S4" in body
+    assert "61%" in body or "0.61" in body or "Teacher support satisfaction" in body
+    # Outstanding uncertainty: the ambiguous link recorded on S1/FB015.
+    assert "FB015" in body
+    assert "Could be read as a general suggestion rather than a specific support complaint." in body
+    # Approvals still required: nothing reviewed yet.
+    assert "Findings review (0/4 reviewed)" in body
+
+    _accept_all(client, run_id)
+    client.post(f"/runs/{run_id}/approve", follow_redirects=False)
+
+    resp = client.get(f"/runs/{run_id}/activity")
+    body = resp.data.decode("utf-8")
+    summary_html = body[body.index('<div class="wf-summary">'):body.index("Full activity trace")]
+    assert "Findings review" not in summary_html
+    assert "Final approval" not in summary_html
+    assert "every gate for this run has been resolved" in summary_html
+
+
 def test_activity_trace_shows_investigation_plan_exactly_once(tmp_path):
     # submit_plan produces both a "tool_call" audit event and a dedicated
     # "investigation_plan" event; the trace must render the plan from the
@@ -532,5 +565,10 @@ def test_activity_trace_shows_investigation_plan_exactly_once(tmp_path):
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
 
-    assert body.count(PLAN_ARGS["goal"]) == 1
+    # The goal legitimately appears twice on the page now: once in the
+    # workflow summary panel (a rollup, not the trace) and once in the
+    # chronological trace itself — but only once *within the trace*.
+    assert body.count(PLAN_ARGS["goal"]) == 2
+    trace_html = body[body.index('<ol class="trace">'):]
+    assert trace_html.count(PLAN_ARGS["goal"]) == 1
     assert "Called submit_plan" not in body

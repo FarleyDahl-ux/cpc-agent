@@ -150,7 +150,8 @@ def create_app(
     def activity(run_id: str):
         state = _get_state_or_404(run_id)
         trace = dashboard_state.build_activity_trace(run_id, _runs_dir())
-        return _render_run_page("activity.html", state, "activity", trace=trace)
+        summary = dashboard_state.build_workflow_summary(run_id, _runs_dir())
+        return _render_run_page("activity.html", state, "activity", trace=trace, summary=summary)
 
     @app.route("/runs/<run_id>/brief")
     def brief(run_id: str):

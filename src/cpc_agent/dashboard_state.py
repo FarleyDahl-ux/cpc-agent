@@ -25,7 +25,7 @@ from pathlib import Path
 from . import config, retention
 from .audit import AuditLog
 from .brief import populate_cpc_template, render_brief_html, update_brief_status
-from .evidence import EvidenceRecord
+from .evidence import EvidenceRecord, readable_measure_label
 from .gates import _excerpt_selection_label, _resolve_excerpts
 from .main import prepare_run_for_review
 from .screening import EligibleComment
@@ -534,6 +534,72 @@ def build_activity_trace(run_id: str, runs_dir: Path = config.RUNS_DIR) -> list[
         if entry is not None:
             trace.append(entry)
     return trace
+
+
+# --- workflow summary panel ---------------------------------------------
+#
+# A single read-only snapshot for the top of the Agent Activity tab, built
+# only from this run's own record (state.json/evidence_records.json/
+# exception_log.json/audit_log.jsonl) — never from a live InvestigationTools
+# instance, and never any comment text. Answers, at a glance: what was this
+# run trying to establish, what did it actually look at, what did it find
+# (with figures), what's still uncertain, and what's still waiting on a
+# human — the same four questions build_activity_trace's event-by-event
+# list answers, just rolled up instead of chronological.
+
+
+def _workflow_goal(events: list[dict]) -> str:
+    """The most recent submit_plan/revise_plan goal — a revision fully
+    replaces the plan (see investigate.InvestigationTools.revise_plan), so
+    the latest one is the model's current stated goal, not the first."""
+    for event in reversed(events):
+        if event.get("event") in ("investigation_plan", "investigation_plan_revision"):
+            return event.get("goal", "")
+    return ""
+
+
+def _workflow_sources(state: dict) -> list[str]:
+    return [filename for _key, filename, present in (tuple(item) for item in state.get("files_found", [])) if present]
+
+
+def _workflow_confirmed_facts(records: list[dict]) -> list[str]:
+    return [
+        f"{r['finding_id']}: {readable_measure_label(r['measure'], r['segment'])} — {r['calculation']} ({r['comparison_rule']})"
+        for r in records
+    ]
+
+
+def _workflow_uncertainty(records: list[dict], exceptions: dict) -> list[str]:
+    items = [entry.get("summary", entry.get("detail", "")) for entry in exceptions.get("limitations", [])]
+    for r in records:
+        for comment_id, note in r.get("ambiguous_links", {}).items():
+            items.append(f"{r['finding_id']}: {comment_id} is ambiguous — {note}")
+    return items
+
+
+def _workflow_approvals_required(state: dict, reviewed: int, total: int) -> list[str]:
+    status = state.get("status")
+    if status == STATUS_REVIEW:
+        return [f"Findings review ({reviewed}/{total} reviewed)"]
+    if status == STATUS_BRIEF_READY:
+        return ["Final approval"]
+    return []
+
+
+def build_workflow_summary(run_id: str, runs_dir: Path = config.RUNS_DIR) -> dict:
+    state = load_state(run_id, runs_dir) or {}
+    records = load_evidence_records(run_id, runs_dir)
+    exceptions = load_exceptions(run_id, runs_dir)
+    events = load_audit_events(run_id, runs_dir)
+    reviewed, total = review_progress(records)
+
+    return {
+        "goal": _workflow_goal(events),
+        "sources": _workflow_sources(state),
+        "confirmed_facts": _workflow_confirmed_facts(records),
+        "uncertainty": _workflow_uncertainty(records, exceptions),
+        "approvals_required": _workflow_approvals_required(state, reviewed, total),
+    }
 
 
 # --- sidebar progress / top banner ------------------------------------

@@ -2,6 +2,44 @@
 {% block title %}Agent activity — {{ state.get('course_code','') }}{% endblock %}
 {% block content %}
 <p class="real-note">This is the run's real audit trail (tool names, search reasons/filters, result IDs and counts) — never comment text, and never illustrative example activity.</p>
+
+<div class="wf-summary">
+  <h2>Workflow summary</h2>
+  <div class="wf-goal">
+    <h3>Goal</h3>
+    <p class="note">{{ summary.goal or "Not yet stated — the investigation hasn't submitted a plan." }}</p>
+  </div>
+  <div class="cols">
+    <div>
+      <h3>Sources used</h3>
+      <ul class="list">
+        {% for s in summary.sources %}<li>{{ s }}</li>{% else %}<li class="note">None recorded.</li>{% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3>Confirmed facts</h3>
+      <ul class="list">
+        {% for f in summary.confirmed_facts %}<li>{{ f }}</li>{% else %}<li class="note">No signals were flagged for this run.</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="cols">
+    <div>
+      <h3>Outstanding uncertainty</h3>
+      <ul class="list">
+        {% for u in summary.uncertainty %}<li>{{ u }}</li>{% else %}<li class="note">None recorded.</li>{% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3>Approvals still required</h3>
+      <ul class="list">
+        {% for a in summary.approvals_required %}<li>{{ a }}</li>{% else %}<li class="note">None — every gate for this run has been resolved.</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+
+<h2>Full activity trace</h2>
 <ol class="trace">
   {% for t in trace %}
   <li class="{{ t.kind }}">

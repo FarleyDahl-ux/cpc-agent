@@ -882,3 +882,54 @@ chosen and recorded here.
   returning nothing in dry-run mode. `--dry-run`'s whole purpose is to let
   an analyst see what *would* be deleted before committing to it, so the
   reporting path has to run whether or not the deletion does.
+
+## Workflow summary panel
+
+- **`build_workflow_summary` reads only the same four files every other
+  dashboard view already reads — `state.json`, `evidence_records.json`,
+  `exception_log.json`, `audit_log.jsonl`** — never a live
+  `InvestigationTools` instance. There is no code path in the dashboard
+  that holds one of those in memory between requests anyway (each HTTP
+  request reconstructs everything from disk, same as `build_activity_trace`
+  always has), so this keeps the same invariant the whole dashboard already
+  relies on: the run folder is the single source of truth, not
+  request-to-request server state.
+- **"Goal" is the *most recent* `investigation_plan`/
+  `investigation_plan_revision` event's `goal` field, found by scanning
+  the audit log in reverse** — a `revise_plan` call fully replaces the
+  plan (see the "Plan-first investigation gating" round), so an earlier
+  goal is stale the moment a revision is logged. Falls back to a plain
+  "not yet stated" message rather than an empty panel section when no
+  plan has been submitted yet (a halted/aborted run, or one that hasn't
+  reached investigation).
+- **"Confirmed facts" is one line per flagged signal — measure, segment,
+  calculation and comparison rule — reusing `readable_measure_label` (the
+  same function the Overview tiles and the brief already use), not a new
+  formatting scheme.** The request asks for "flagged results with
+  figures"; a signal's `calculation`/`comparison_rule` are exactly the
+  figures CLAUDE.md's own evidence-record schema already carries, so this
+  is a rollup of existing fields, not a new derived metric.
+- **"Outstanding uncertainty" combines two different sources that are
+  both, literally, recorded uncertainty: `exception_log.json`'s
+  `limitations` entries (budget exhaustion, unresolved data gaps) and
+  every evidence record's `ambiguous_links` (the "Ambiguous links" round).**
+  These are conceptually the same kind of thing from two different stages
+  of the pipeline — one from validation/investigation limits, one from a
+  specific link's classification — and the request names both explicitly
+  ("limitations and ambiguous links"), so they're merged into one list
+  rather than kept in two separate panel sections that would each be
+  sparse on their own.
+- **"Approvals still required" is derived from `state["status"]` alone
+  (`STATUS_REVIEW` -> findings review with a live reviewed/total count,
+  `STATUS_BRIEF_READY` -> final approval, anything else -> none)**, not
+  from re-deriving it independently from the evidence records each time.
+  `review_progress(records)` (already used everywhere else a "how many
+  reviewed" figure is needed) is the one source for the count, so the
+  panel's number can't drift from what the sidebar progress steps and the
+  review page's own "X of Y reviewed" line already show.
+- **The panel is scoped to the Agent Activity tab, not a new tab of its
+  own** — the request calls it "a summary panel to the Agent activity
+  tab", and it answers the same questions the tab's chronological trace
+  already answers, just rolled up instead of event-by-event; adding a
+  fifth tab for a rollup of the fourth would fragment one view into two
+  for no reason a user asked for.
