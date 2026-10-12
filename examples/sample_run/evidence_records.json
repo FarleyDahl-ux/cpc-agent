@@ -1,0 +1,145 @@
+[
+  {
+    "finding_id": "S1",
+    "measure": "teacher_support",
+    "segment": "Online",
+    "calculation": "61% satisfied (n=380)",
+    "comparison_rule": "11 points below organisation average (72%, 2025) and 5 points below 2024 (66%); n=380 \u2265 30",
+    "source_file": "satisfaction.csv",
+    "period": "2025",
+    "n": 380.0,
+    "value": 61.0,
+    "details": {
+      "organisation_avg_pct": 72.0,
+      "gap_vs_org": -11.0,
+      "prev_pct_satisfied": 66.0,
+      "gap_vs_prev": -5.0
+    },
+    "aligned_ids": [
+      "FB003",
+      "FB007",
+      "FB011",
+      "FB015"
+    ],
+    "countervailing_ids": [
+      "FB005"
+    ],
+    "aligned_excerpt_ids": [],
+    "countervailing_excerpt_ids": [],
+    "aligned_excerpt_selection": "automatic selection (first two by ID)",
+    "countervailing_excerpt_selection": "automatic selection (first two by ID)",
+    "ambiguous_links": {
+      "FB015": "The request suggests a possible support gap but does not explicitly say existing responses are insufficient."
+    },
+    "themes": [
+      "Teacher responsiveness and support"
+    ],
+    "evidence_status": "Mixed",
+    "limitation": "Aligned and countervailing feedback were both found; feedback is reported experience and does not establish cause.",
+    "reviewer": "",
+    "reviewer_status": "Pending",
+    "reviewer_note": ""
+  },
+  {
+    "finding_id": "S2",
+    "measure": "assessment_clarity",
+    "segment": "Online",
+    "calculation": "58% satisfied (n=380)",
+    "comparison_rule": "5 points below organisation average (63%, 2025); n=380 \u2265 30",
+    "source_file": "satisfaction.csv",
+    "period": "2025",
+    "n": 380.0,
+    "value": 58.0,
+    "details": {
+      "organisation_avg_pct": 63.0,
+      "gap_vs_org": -5.0,
+      "prev_pct_satisfied": 60.0,
+      "gap_vs_prev": -2.0
+    },
+    "aligned_ids": [
+      "FB002",
+      "FB009",
+      "FB013"
+    ],
+    "countervailing_ids": [
+      "FB017"
+    ],
+    "aligned_excerpt_ids": [],
+    "countervailing_excerpt_ids": [],
+    "aligned_excerpt_selection": "automatic selection (first two by ID)",
+    "countervailing_excerpt_selection": "automatic selection (first two by ID)",
+    "ambiguous_links": {},
+    "themes": [
+      "Assessment clarity"
+    ],
+    "evidence_status": "Mixed",
+    "limitation": "Aligned and countervailing feedback were both found; feedback is reported experience and does not establish cause.",
+    "reviewer": "",
+    "reviewer_status": "Pending",
+    "reviewer_note": ""
+  },
+  {
+    "finding_id": "S3",
+    "measure": "unit_withdrawal_rate",
+    "segment": "CWSU204",
+    "calculation": "544 / 1600 \u00d7 100 = 34.0%",
+    "comparison_rule": "\u226520% and \u22651.5\u00d7 median unit withdrawal rate (12.49%)",
+    "source_file": "unit_results.csv",
+    "period": "2025",
+    "n": 1600.0,
+    "value": 34.0,
+    "details": {
+      "unit_title": "Work within a legal and ethical framework",
+      "median_unit_withdrawal_rate": 12.486486486486488
+    },
+    "aligned_ids": [],
+    "countervailing_ids": [],
+    "aligned_excerpt_ids": [],
+    "countervailing_excerpt_ids": [],
+    "aligned_excerpt_selection": "automatic selection (first two by ID)",
+    "countervailing_excerpt_selection": "automatic selection (first two by ID)",
+    "ambiguous_links": {},
+    "themes": [],
+    "evidence_status": "No qualitative evidence",
+    "limitation": "No eligible comments could reasonably be linked to this signal.",
+    "reviewer": "",
+    "reviewer_status": "Pending",
+    "reviewer_note": ""
+  },
+  {
+    "finding_id": "S4",
+    "measure": "segment_withdrawal_rate",
+    "segment": "Online",
+    "calculation": "684 / 1800 \u00d7 100 = 38.0%",
+    "comparison_rule": "risen \u22655 percentage points on 2024 (31.0% \u2192 38.0%)",
+    "source_file": "course_metrics.csv",
+    "period": "2025",
+    "n": 1800.0,
+    "value": 38.0,
+    "details": {
+      "prev_period": "2024",
+      "prev_rate": 31.0,
+      "prev_enrolments": 1500.0,
+      "change_pp": 7.0
+    },
+    "aligned_ids": [
+      "FB024"
+    ],
+    "countervailing_ids": [],
+    "aligned_excerpt_ids": [],
+    "countervailing_excerpt_ids": [],
+    "aligned_excerpt_selection": "automatic selection (first two by ID)",
+    "countervailing_excerpt_selection": "automatic selection (first two by ID)",
+    "ambiguous_links": {
+      "FB024": "The learner describes nearly dropping out, not an explicit completed withdrawal; the wording does not establish whether they withdrew."
+    },
+    "themes": [
+      "Flexibility and course pacing"
+    ],
+    "evidence_status": "Limited",
+    "limitation": "Based on only one or two eligible comments; not a representative sample of all learners.",
+    "reviewer": "",
+    "reviewer_status": "Pending",
+    "reviewer_note": ""
+  }
+]

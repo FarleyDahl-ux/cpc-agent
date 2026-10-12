@@ -1,0 +1,25 @@
+{
+  "pauses": [],
+  "exclusions": [
+    {
+      "issue_key": "course_metrics.csv:2025:Region C:Blended:withdrawals",
+      "detail": "Excluded reporting_period=2025, delivery_region=Region C, delivery_mode=Blended from course_metrics.csv \u2014 blank 'withdrawals' (value never estimated).",
+      "summary": "Region C blended delivery was excluded because the 2025 withdrawal figure was missing."
+    }
+  ],
+  "quarantined": [
+    {
+      "comment_id": "FB016",
+      "reason": "identifying_information",
+      "detail": "Quarantined comment FB016: identifying_information.",
+      "summary": "A comment was held back from review because it appeared to identify a person."
+    },
+    {
+      "comment_id": "FB018",
+      "reason": "possible_injection",
+      "detail": "Quarantined comment FB018: possible_injection.",
+      "summary": "A comment was held back from review because it looked like an attempt to change how this tool behaves, rather than genuine feedback."
+    }
+  ],
+  "limitations": []
+}
