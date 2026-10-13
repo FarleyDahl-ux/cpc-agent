@@ -45,6 +45,7 @@
   </aside>
   <main>
     {% if state %}
+    <div class="pane-head">
     <div class="top">
       <div>
         <h1>{{ state.get('course_code', '') }} {{ state.get('course_title', '') }}</h1>
@@ -60,11 +61,14 @@
       <a href="{{ url_for('activity', run_id=state.run_id) }}" class="{{ 'active' if active_tab=='activity' else '' }}">Agent activity</a>
       <a href="{{ url_for('brief', run_id=state.run_id) }}" class="{{ 'active' if active_tab=='brief' else '' }}">Brief and approval</a>
     </nav>
+    </div>
     {% endif %}
+    <div class="pane-body">
     {% if error_message %}
     <div class="error-box">{{ error_message }}</div>
     {% endif %}
     {% block content %}{% endblock %}
+    </div>
   </main>
 </div>
 </body>
