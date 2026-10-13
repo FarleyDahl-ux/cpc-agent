@@ -144,7 +144,7 @@ def create_app(
         )
         if not ok:
             return _error_response(message, state=state)
-        return redirect(url_for("review", run_id=run_id))
+        return redirect(url_for("review", run_id=run_id) + f"#finding-{finding_id}")
 
     @app.route("/runs/<run_id>/activity")
     def activity(run_id: str):

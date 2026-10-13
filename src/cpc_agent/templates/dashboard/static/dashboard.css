@@ -71,7 +71,7 @@ h2 { font-size:15px; color:var(--ink); margin:0 0 10px; }
 .note { font-size:13px; color:var(--muted); }
 
 /* findings */
-.finding { border:1px solid var(--rule); border-radius:10px; padding:16px 18px; margin-bottom:14px; }
+.finding { border:1px solid var(--rule); border-radius:10px; padding:16px 18px; margin-bottom:14px; scroll-margin-top:12px; }
 .finding.accepted { border-color:#B9D6C5; background:#FAFDFB; }
 .finding.rejected { opacity:.62; }
 .f-head { display:flex; justify-content:space-between; gap:16px; align-items:baseline; }
@@ -131,6 +131,7 @@ input[type=text] { font:inherit; padding:6px 10px; border:1px solid var(--rule);
   .app { grid-template-columns:1fr; height:auto; overflow:visible; } aside { border-right:0; border-bottom:1px solid var(--rule); overflow-y:visible; }
   main { overflow:visible; } .pane-head { position:sticky; top:0; z-index:5; padding:18px; padding-bottom:0; } .pane-body { overflow-y:visible; padding:18px; }
   .pane-head + .pane-body { padding-top:18px; }
+  .finding { scroll-margin-top:200px; }
   .tiles { grid-template-columns:repeat(2,1fr); } .cols, .ev { grid-template-columns:1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }

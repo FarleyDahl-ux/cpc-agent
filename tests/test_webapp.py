@@ -507,6 +507,19 @@ def test_review_with_a_real_note_succeeds_for_edit_and_reject(tmp_path, decision
     assert s1["reviewer_note"] == "Needs a closer look."
 
 
+def test_review_decision_redirects_back_to_the_same_finding(tmp_path):
+    app = _make_app(tmp_path)
+    client = app.test_client()
+    run_id = _start_run(client)
+
+    resp = client.post(f"/runs/{run_id}/review/S3", data={"decision": "accept", "note": ""})
+    assert resp.status_code == 302
+    assert resp.location.endswith(f"/runs/{run_id}/review#finding-S3")
+
+    page = client.get(f"/runs/{run_id}/review")
+    assert b'id="finding-S3"' in page.data
+
+
 def test_review_accept_never_requires_a_note(tmp_path):
     app = _make_app(tmp_path)
     client = app.test_client()

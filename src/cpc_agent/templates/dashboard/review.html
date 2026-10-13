@@ -3,7 +3,7 @@
 {% block content %}
 <p class="progress-line">{{ reviewed }} of {{ total }} findings reviewed. Tick up to two comments per side to show as excerpts in the brief.</p>
 {% for r in records %}
-<article class="finding {{ 'accepted' if r.reviewer_status in ('accept', 'edit') else ('rejected' if r.reviewer_status == 'reject' else '') }}">
+<article id="finding-{{ r.finding_id }}" class="finding {{ 'accepted' if r.reviewer_status in ('accept', 'edit') else ('rejected' if r.reviewer_status == 'reject' else '') }}">
   <div class="f-head"><h3>{{ r.finding_id }} · {{ readable_label(r.measure, r.segment) }}</h3></div>
   <div class="f-head"><span class="v">{{ r.calculation }} · {{ r.comparison_rule }} · n={{ r.n|int }} · {{ r.evidence_status }}</span></div>
   <form method="post" action="{{ url_for('submit_review', run_id=state.run_id, finding_id=r.finding_id) }}">
